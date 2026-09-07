@@ -42,6 +42,14 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ### 从 GitHub 仓库安装
 
+Windows 如果尚未安装 Git，先执行：
+
+```powershell
+winget install --id Git.Git -e --source winget
+```
+
+安装完成后重新打开终端，再执行下面的安装命令。
+
 已安装 Git 时，也可以用一条命令拉取仓库并安装。
 
 macOS / Linux：
@@ -60,7 +68,7 @@ git clone https://github.com/Christanding/CrystalSketch.git; if ($LASTEXITCODE -
 
 ## 启动与使用
 
-在任意文件夹打开终端，输入：
+直接打开终端，输入以下命令即可，无需进入项目文件夹：
 
 ```sh
 Crystal
@@ -73,5 +81,25 @@ Crystal
 3. 在“导出”中设置图片参数并保存；如需修改结构，先在“建模”中创建模型副本，完成修改后再导出 POSCAR。
 
 使用期间保持启动终端运行。结束后，在该终端按 `Ctrl+C` 停止程序；下次使用只需再次执行启动命令，无需重新安装。
+
+## 常见问题
+
+### Windows 提示无法识别 Crystal
+
+如果已经安装 CrystalSketch，但输入 `Crystal` 时提示“无法识别”或“不是内部或外部命令”，可能是命令目录尚未加入 PATH，或当前终端尚未刷新环境变量。
+
+在 **PowerShell** 中执行一次以下通用修复命令：
+
+```powershell
+uv tool update-shell; $env:Path = "$(uv tool dir --bin);$env:Path"; Crystal
+```
+
+这条命令会自动读取本机的命令目录，配置后续终端的命令路径，并刷新当前窗口的 PATH 后启动 CrystalSketch。无需手动填写用户名、盘符或安装路径。
+
+修复后，日常直接输入 `Crystal` 即可。如果其他已打开的终端仍无法识别，请完全关闭终端程序后重新打开，而不只是新建标签页。
+
+此命令用于修复已安装程序的命令路径，不能替代安装。如果 `uv` 也无法识别，或 `uv tool list` 中没有 `crystalsketch`，请先按上面的安装步骤完成安装。
+
+## 许可证
 
 本项目采用 [MIT 许可证](LICENSE)。
