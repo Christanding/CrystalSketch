@@ -82,7 +82,10 @@ function resetMockCamera() {
   latticeSceneRenderCount = 0;
 }
 
+// Keep export-renderer APIs available when another suite loads after this mock.
+const fiberExports = { ...await import("@react-three/fiber") };
 mock.module("@react-three/fiber", () => ({
+  ...fiberExports,
   Canvas: ({
     camera,
     children,
