@@ -20,7 +20,7 @@ CrystalSketch 是一款在浏览器中使用的晶体结构可视化与制图工
 
 支持 macOS、Windows 和 Linux，使用支持 WebGL 的现代浏览器。
 
-### 下载安装包（推荐）
+### 下载压缩包
 
 前往 [GitHub Releases](https://github.com/Christanding/CrystalSketch/releases/latest)，在 **Assets** 中下载 **CrystalSketch.zip**，或[直接下载最新安装包](https://github.com/Christanding/CrystalSketch/releases/latest/download/CrystalSketch.zip)。不要将 GitHub 自动生成的 `Source code (zip)` 当作安装包。
 
@@ -40,7 +40,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 首次安装需要联网，安装程序会自动准备 Python 和所需依赖，无需手动安装开发工具或编译项目。安装完成后重新打开终端即可使用，不需要保留源码文件夹。
 
-### 从 GitHub 仓库安装
+### 从 GitHub 仓库安装（推荐）
 
 Windows 如果尚未安装 Git，先执行：
 
