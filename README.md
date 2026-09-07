@@ -129,6 +129,30 @@ uv tool uninstall crystalsketch
 
 此命令用于修复已安装程序的命令路径，不能替代安装。如果 `uv` 也无法识别，或 `uv tool list` 中没有 `crystalsketch`，请先按上面的安装步骤完成安装。
 
+### Windows 提示无法识别 uv
+
+先完全关闭终端程序并重新打开，再输入 `uv --version` 检查。如果尚未安装 uv，可在 PowerShell 中选择以下任意一种方式安装，**不需要两种都执行**。
+
+方式一：使用 WinGet：
+
+```powershell
+winget install --id astral-sh.uv -e --source winget
+```
+
+方式二：如果无法识别 `winget`，使用官方安装脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+安装完成后，完全关闭终端程序并重新打开，再执行：
+
+```powershell
+uv --version
+```
+
+显示版本号即表示安装成功。
+
 ## 许可证
 
 本项目采用 [MIT 许可证](LICENSE)。
