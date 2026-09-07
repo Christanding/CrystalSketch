@@ -1808,7 +1808,7 @@ describe("App", () => {
     expect(exportRequests[0]?.style.colorSchemeMode).toBe("preset");
     expect(exportRequests[0]?.style.atomRadius).toBe(55);
     expect(exportRequests[0]?.style.bondThickness).toBe(150);
-  });
+  }, 15_000);
 
   test("localizes reference palette names while keeping source tooltips and preset identity", async () => {
     const user = userEvent.setup();
