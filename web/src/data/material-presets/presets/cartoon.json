@@ -1,0 +1,19 @@
+{
+  "id": "cartoon",
+  "label": "卡通",
+  "description": "CuI Phong highlights, a soft reverse fill light and fine black contours.",
+  "material": {
+    "type": "MeshPhongMaterial",
+    "props": { "shininess": 300, "specular": "#ffffff", "flatShading": false }
+  },
+  "overrides": {
+    "polyhedron": {
+      "material": { "type": "MeshToonMaterial", "props": {} }
+    }
+  },
+  "lighting": [
+    { "type": "AmbientLight", "props": { "intensity": 0.6 } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.7, "offset": [1.5, 1.5, 0] } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.2, "offset": [-1, -1, -2], "fixedDirection": true } }
+  ]
+}

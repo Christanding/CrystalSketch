@@ -1,0 +1,421 @@
+import { useThree } from "@react-three/fiber";
+import { MeasurementAnnotations } from "./MeasurementAnnotations";
+import { memo, useCallback, useLayoutEffect, useMemo } from "react";
+import { Fog } from "three";
+
+import type { SceneSpec } from "../api/scene";
+import type {
+  ComponentOpacityState,
+  ExportMeshQuality,
+  StyleState,
+  UnitCellLineStyle,
+} from "../model";
+import {
+  baseColorSchemeForStyle,
+  DEFAULT_BOND_COLOR,
+  elementColorOverridesForStyle,
+} from "../model";
+import { PREVIEW_THEME_COLORS } from "../theme/previewTheme";
+import {
+  DEFAULT_SELECTION_ACTIVATION,
+  type SelectionActivation,
+} from "../selection/selectionActivationPreference";
+import type { ResolvedStructureMaterialFamilies } from "./materialPresetResolver";
+import type { SceneLayout } from "./sceneLayout";
+import type { VectorTuple } from "./viewMath";
+import { BatchedAtoms } from "./BatchedAtoms";
+import { BatchedBonds } from "./BatchedBonds";
+import { createBondRenderItems } from "./BondRenderItems";
+import { BOND_RADIUS } from "./sceneGeometry";
+import { CellFrame } from "./CellFrame";
+import { MemoizedBatchedPolyhedra } from "./BatchedPolyhedra";
+import { isRenderableItem } from "./renderItemPolicy";
+export {
+  POLYHEDRON_EDGE_COLOR,
+  POLYHEDRON_EDGE_OPACITY,
+  POLYHEDRON_SURFACE_OPACITY,
+} from "./BatchedPolyhedra";
+
+export interface SceneMeshDetail {
+  bondRadialSegments: number;
+  sphereHeightSegments: number;
+  sphereWidthSegments: number;
+}
+
+export const BOND_COLOR = DEFAULT_BOND_COLOR;
+export const BOND_TUBE_RADIAL_SEGMENTS = 24;
+export const SCENE_FOG_COLOR = PREVIEW_THEME_COLORS.light.fog;
+const FOG_FRONT_PADDING_RATIO = 0.4;
+
+export const PREVIEW_SCENE_MESH_DETAIL: SceneMeshDetail = {
+  bondRadialSegments: 16,
+  sphereHeightSegments: 24,
+  sphereWidthSegments: 32,
+};
+
+export const EXPORT_SCENE_MESH_DETAIL_PRESETS: Record<
+  ExportMeshQuality,
+  SceneMeshDetail
+> = {
+  low: {
+    bondRadialSegments: 12,
+    sphereHeightSegments: 16,
+    sphereWidthSegments: 24,
+  },
+  medium: PREVIEW_SCENE_MESH_DETAIL,
+  high: {
+    bondRadialSegments: BOND_TUBE_RADIAL_SEGMENTS,
+    sphereHeightSegments: 32,
+    sphereWidthSegments: 48,
+  },
+  xhigh: {
+    bondRadialSegments: 32,
+    sphereHeightSegments: 48,
+    sphereWidthSegments: 72,
+  },
+};
+
+export function PreviewSceneContent({
+  componentOpacity,
+  fogColor,
+  layout,
+  materialFamilies,
+  meshDetail,
+  scene,
+  selectionHighlightColor,
+  inspectedAtomId,
+  inspectedBondId,
+  interactionLocked,
+  selectionActivation = DEFAULT_SELECTION_ACTIVATION,
+  onAtomInspect,
+  onAtomPulse,
+  onBondInspect,
+  onBondPulse,
+  onLockedInteractionAttempt,
+  polyhedronEdgeLineWidthScale = 1,
+  pulseAtomId,
+  pulseBondId,
+  pulseBondToken,
+  pulseToken,
+  showAtoms,
+  showUnitCell,
+  style,
+  unitCellLineStyle = "solid",
+  unitCellLineColor,
+  unitCellLineWidthScale = 1,
+}: {
+  componentOpacity: ComponentOpacityState;
+  fogColor?: string;
+  layout: SceneLayout;
+  materialFamilies: ResolvedStructureMaterialFamilies;
+  meshDetail: SceneMeshDetail;
+  scene: SceneSpec;
+  selectionHighlightColor?: string;
+  inspectedAtomId: string | null;
+  inspectedBondId: string | null;
+  interactionLocked: boolean;
+  selectionActivation?: SelectionActivation;
+  onAtomInspect?: (atomId: string | null) => void;
+  onAtomPulse?: (atomId: string) => void;
+  onBondInspect?: (bondId: string | null) => void;
+  onBondPulse?: (bondId: string) => void;
+  onLockedInteractionAttempt?: () => void;
+  polyhedronEdgeLineWidthScale?: number;
+  pulseAtomId: string | null;
+  pulseBondId: string | null;
+  pulseBondToken: number;
+  pulseToken: number;
+  showAtoms: boolean;
+  showUnitCell: boolean;
+  style: StyleState;
+  unitCellLineStyle?: UnitCellLineStyle;
+  unitCellLineColor?: string;
+  unitCellLineWidthScale?: number;
+}) {
+  return (
+    <>
+      <SceneFog color={fogColor} layout={layout} style={style} />
+      <group position={layout.groupPosition}>
+        <MeasurementAnnotations scene={scene} scale={layout.span} color={unitCellLineColor}
+          style={style} showAtoms={showAtoms} atomOpacity={componentOpacity.atoms} bondOpacity={componentOpacity.bonds} />
+      </group>
+      <MemoizedStructureSceneObjects
+        componentOpacity={componentOpacity}
+        groupPosition={layout.groupPosition}
+        materialFamilies={materialFamilies}
+        meshDetail={meshDetail}
+        scene={scene}
+        selectionHighlightColor={selectionHighlightColor}
+        inspectedAtomId={inspectedAtomId}
+        inspectedBondId={inspectedBondId}
+        interactionLocked={interactionLocked}
+        selectionActivation={selectionActivation}
+        onAtomInspect={onAtomInspect}
+        onAtomPulse={onAtomPulse}
+        onBondInspect={onBondInspect}
+        onBondPulse={onBondPulse}
+        onLockedInteractionAttempt={onLockedInteractionAttempt}
+        polyhedronEdgeLineWidthScale={polyhedronEdgeLineWidthScale}
+        pulseAtomId={pulseAtomId}
+        pulseBondId={pulseBondId}
+        pulseBondToken={pulseBondToken}
+        pulseToken={pulseToken}
+        showAtoms={showAtoms}
+        showUnitCell={showUnitCell}
+        style={style}
+        unitCellLineStyle={unitCellLineStyle}
+        unitCellLineColor={unitCellLineColor}
+        unitCellLineWidthScale={unitCellLineWidthScale}
+      />
+    </>
+  );
+}
+
+export function SceneFog({
+  color = SCENE_FOG_COLOR,
+  layout,
+  style,
+}: {
+  color?: string;
+  layout: SceneLayout;
+  style: StyleState;
+}) {
+  const { invalidate, scene } = useThree();
+  const fog = useMemo(
+    () =>
+      style.fogEnabled
+        ? createSceneFog(
+            layout.standardPose.distance,
+            layout.span,
+            layout.depthFadingBackOffset,
+            layout.depthFadingFrontOffset,
+            style.fogAmount,
+            style.fogStart,
+            color,
+          )
+        : null,
+    [
+      color,
+      layout.span,
+      layout.depthFadingBackOffset,
+      layout.depthFadingFrontOffset,
+      layout.standardPose.distance,
+      style.fogAmount,
+      style.fogEnabled,
+      style.fogStart,
+    ],
+  );
+
+  useLayoutEffect(() => {
+    const previousFog = scene.fog;
+    scene.fog = fog;
+    invalidate();
+
+    return () => {
+      if (scene.fog === fog) {
+        scene.fog = previousFog;
+        invalidate();
+      }
+    };
+  }, [fog, invalidate, scene]);
+
+  return null;
+}
+
+export function createSceneFog(
+  cameraDistance: number,
+  span: number,
+  backOffset: number,
+  frontOffset: number,
+  amount: number,
+  start: number,
+  color = SCENE_FOG_COLOR,
+): Fog | null {
+  const safeAmount = Number.isFinite(amount) ? amount : 0;
+  const safeStart = Number.isFinite(start) ? start : 0;
+  const normalizedAmount = Math.min(1, Math.max(0, safeAmount / 100));
+  const normalizedStart = Math.min(1, Math.max(0, safeStart / 100));
+  if (normalizedAmount <= 0) {
+    return null;
+  }
+
+  const safeSpan = Number.isFinite(span) ? Math.max(1, span) : 1;
+  const safeBackOffset = Number.isFinite(backOffset)
+    ? Math.max(0.01 * safeSpan, backOffset)
+    : 0.01 * safeSpan;
+  const safeFrontOffset = Number.isFinite(frontOffset)
+    ? Math.min(safeBackOffset, frontOffset)
+    : 0;
+  const safeCameraDistance = Number.isFinite(cameraDistance)
+    ? Math.max(0.01, cameraDistance)
+    : 0.01;
+  const frontPadding = safeSpan * FOG_FRONT_PADDING_RATIO;
+  const firstStartOffset = safeFrontOffset - frontPadding;
+  const lastStartOffset = Math.max(
+    firstStartOffset,
+    safeBackOffset - frontPadding,
+  );
+  const startOffset = lerp(firstStartOffset, lastStartOffset, normalizedStart);
+  const near = safeCameraDistance + startOffset;
+  const back = safeCameraDistance + safeBackOffset;
+  const far = near + (back - near) / normalizedAmount;
+
+  return new Fog(color, near, far);
+}
+
+function lerp(start: number, end: number, amount: number): number {
+  return start + (end - start) * amount;
+}
+
+export function StructureSceneObjects({
+  componentOpacity,
+  groupPosition,
+  interactionLocked = false,
+  selectionActivation = DEFAULT_SELECTION_ACTIVATION,
+  materialFamilies,
+  meshDetail,
+  scene,
+  selectionHighlightColor,
+  inspectedAtomId = null,
+  inspectedBondId = null,
+  onAtomInspect,
+  onAtomPulse,
+  onBondInspect,
+  onBondPulse,
+  onLockedInteractionAttempt,
+  polyhedronEdgeLineWidthScale = 1,
+  pulseAtomId = null,
+  pulseBondId = null,
+  pulseBondToken = 0,
+  pulseToken = 0,
+  showAtoms,
+  showUnitCell,
+  style,
+  unitCellLineColor,
+  unitCellLineStyle = "solid",
+  unitCellLineWidthScale = 1,
+}: {
+  componentOpacity: ComponentOpacityState;
+  groupPosition: VectorTuple;
+  interactionLocked?: boolean;
+  selectionActivation?: SelectionActivation;
+  materialFamilies: ResolvedStructureMaterialFamilies;
+  meshDetail: SceneMeshDetail;
+  scene: SceneSpec;
+  selectionHighlightColor?: string;
+  inspectedAtomId?: string | null;
+  inspectedBondId?: string | null;
+  onAtomInspect?: (atomId: string | null) => void;
+  onAtomPulse?: (atomId: string) => void;
+  onBondInspect?: (bondId: string | null) => void;
+  onBondPulse?: (bondId: string) => void;
+  onLockedInteractionAttempt?: () => void;
+  polyhedronEdgeLineWidthScale?: number;
+  pulseAtomId?: string | null;
+  pulseBondId?: string | null;
+  pulseBondToken?: number;
+  pulseToken?: number;
+  showAtoms: boolean;
+  showUnitCell: boolean;
+  style: StyleState;
+  unitCellLineColor?: string;
+  unitCellLineStyle?: UnitCellLineStyle;
+  unitCellLineWidthScale?: number;
+}) {
+  const colorOverrides = useMemo(
+    () => elementColorOverridesForStyle(scene.atoms, style),
+    [scene.atoms, style],
+  );
+  const colorScheme = baseColorSchemeForStyle(style);
+  const bondRenderItems = useMemo(
+    () =>
+      createBondRenderItems({
+        atoms: scene.atoms,
+        bondColor: style.bondColor,
+        bondOpacity: componentOpacity.bonds,
+        bondRadius: BOND_RADIUS * (style.bondThickness / 100),
+        bonds: scene.bonds,
+        colorMode: style.bondColorMode,
+        colorScheme,
+        colorOverrides,
+        style,
+      }),
+    [colorScheme, colorOverrides, componentOpacity.bonds, scene.atoms, scene.bonds, style],
+  );
+  const handleSceneClear = useCallback((event: { metaKey?: boolean; ctrlKey?: boolean }) => {
+    if (interactionLocked || event.metaKey || event.ctrlKey) {
+      return;
+    }
+
+    onAtomInspect?.(null);
+    onBondInspect?.(null);
+  }, [interactionLocked, onAtomInspect, onBondInspect]);
+
+  return (
+    <group onClick={handleSceneClear} onPointerMissed={handleSceneClear}>
+      <group position={groupPosition}>
+        {showUnitCell &&
+        isRenderableItem({ opacity: componentOpacity.unitCell }) ? (
+          <CellFrame
+            color={unitCellLineColor}
+            fog={style.fogEnabled && style.fogAffectsUnitCell}
+            lineWidthScale={unitCellLineWidthScale}
+            opacity={componentOpacity.unitCell / 100}
+            lineStyle={unitCellLineStyle}
+            vectors={scene.cell.vectors}
+          />
+        ) : null}
+        {isRenderableItem({ opacity: componentOpacity.polyhedra }) ? (
+          <MemoizedBatchedPolyhedra
+            atoms={scene.atoms}
+            materialFamily={materialFamilies.polyhedron}
+            opacity={componentOpacity.polyhedra / 100}
+            polyhedra={scene.polyhedra}
+            lineWidthScale={polyhedronEdgeLineWidthScale}
+            style={style}
+          />
+        ) : null}
+        {bondRenderItems.length > 0 ? (
+          <BatchedBonds
+            bondRenderItems={bondRenderItems}
+            colorMode={style.bondColorMode}
+            inspectedBondId={inspectedBondId}
+            interactionLocked={interactionLocked}
+            selectionActivation={selectionActivation}
+            materialFamily={materialFamilies.bond}
+            meshDetail={meshDetail}
+            onInspect={onBondInspect}
+            onLockedInteractionAttempt={onLockedInteractionAttempt}
+            onPulse={onBondPulse}
+            pulseBondId={pulseBondId}
+            pulseToken={pulseBondToken}
+            selectionHighlightColor={selectionHighlightColor}
+            thicknessScale={style.bondThickness / 100}
+          />
+        ) : null}
+        {showAtoms ? (
+          <BatchedAtoms
+            atomOpacity={componentOpacity.atoms}
+            atoms={scene.atoms}
+            colorScheme={colorScheme}
+            colorOverrides={colorOverrides}
+            inspectedAtomId={inspectedAtomId}
+            interactionLocked={interactionLocked}
+            selectionActivation={selectionActivation}
+            materialFamily={materialFamilies.atom}
+            meshDetail={meshDetail}
+            onInspect={onAtomInspect}
+            onPulse={onAtomPulse}
+            onLockedInteractionAttempt={onLockedInteractionAttempt}
+            pulseAtomId={pulseAtomId}
+            pulseToken={pulseToken}
+            selectionHighlightColor={selectionHighlightColor}
+            style={style}
+          />
+        ) : null}
+      </group>
+    </group>
+  );
+}
+
+export const MemoizedStructureSceneObjects = memo(StructureSceneObjects);

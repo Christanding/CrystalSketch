@@ -1,0 +1,55 @@
+{
+  "id": "soft-velvet",
+  "label": "细绒柔光",
+  "description": "Rough opaque surface with a grazing-angle cloth sheen, without hair geometry or emissive rim glow.",
+  "material": {
+    "type": "MeshPhysicalMaterial",
+    "props": {
+      "metalness": 0,
+      "roughness": 0.88,
+      "sheen": 0.65,
+      "sheenColor": "#e0e3e7",
+      "sheenRoughness": 0.7,
+      "specularIntensity": 0.15
+    }
+  },
+  "overrides": {
+    "polyhedron": {
+      "material": {
+        "type": "MeshToonMaterial",
+        "props": {}
+      }
+    }
+  },
+  "lighting": [
+    {
+      "type": "AmbientLight",
+      "props": {
+        "intensity": 0.6
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 0.7,
+        "offset": [
+          1.5,
+          1.5,
+          0
+        ]
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 0.2,
+        "offset": [
+          -1,
+          -1,
+          -2
+        ],
+        "fixedDirection": true
+      }
+    }
+  ]
+}

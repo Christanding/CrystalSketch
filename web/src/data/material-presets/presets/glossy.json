@@ -1,0 +1,40 @@
+{
+  "id": "glossy",
+  "label": "Glossy",
+  "description": "A low-roughness non-metal surface for crisp light response.",
+  "material": {
+    "type": "MeshStandardMaterial",
+    "props": {
+      "metalness": 0.0,
+      "roughness": 0.2,
+      "flatShading": false
+    }
+  },
+  "overrides": {
+    "polyhedron": {
+      "material": {
+        "type": "MeshStandardMaterial",
+        "props": {
+          "metalness": 0.1,
+          "roughness": 0.1,
+          "flatShading": false
+        }
+      }
+    }
+  },
+  "lighting": [
+    {
+      "type": "AmbientLight",
+      "props": {
+        "intensity": 0.8
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 2.2,
+        "offset": [0.3, 0.2, 0]
+      }
+    }
+  ]
+}

@@ -1,0 +1,652 @@
+import { type ThreeEvent, useFrame, useThree } from "@react-three/fiber";
+import { useSceneSelection } from "../selection/SceneSelection";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from "react";
+import {
+  BatchedMesh,
+  BufferGeometry,
+  Color,
+  InstancedMesh,
+  Matrix4,
+  Quaternion,
+  ShaderMaterial,
+  SphereGeometry,
+  Vector3,
+} from "three";
+
+import type { AtomSpec } from "../api/scene";
+import type { ElementColorOverrides } from "../model/colorSchemes";
+import type { StyleState } from "../model";
+import type { SelectionActivation } from "../selection/selectionActivationPreference";
+import type { ResolvedStructureMaterialFamily } from "./materialPresetResolver";
+import { STRUCTURE_RENDER_ORDER } from "./renderOrder";
+import { StructureMaterial } from "./StructureMaterial";
+import type { SceneMeshDetail } from "./StructureSceneObjects";
+import {
+  ATOM_HIGHLIGHT_PULSE_COLOR_MIX,
+  ATOM_HIGHLIGHT_PULSE_MS,
+  ATOM_HIGHLIGHT_SELECTED_COLOR_MIX,
+  ATOM_HIGHLIGHT_TARGET_COLOR,
+  SELECTION_HANDOFF_MS,
+  SELECTION_HANDOFF_WHITE_MIX,
+  SELECTION_HIGHLIGHT_COLOR,
+  atomPulseFade,
+  easeOutCubic,
+} from "./atomHighlight";
+import {
+  atomRenderItemById,
+  createAtomRenderItems,
+  type AtomRenderItem,
+} from "./AtomRenderItems";
+import {
+  createBatchPickRegistry,
+  itemForBatchId,
+  registerBatchPickItem,
+  type BatchPickRegistry,
+} from "./batchPicking";
+import { selectionPointerAction } from "./selectionActivation";
+import {
+  batchedInstanceRgbaProgramCacheKey,
+  enableBatchedInstanceRgba,
+  setBatchedInstanceRgba,
+} from "./batchedInstanceRgba";
+
+interface AtomBatchBuild {
+  itemCount: number;
+  items: AtomRenderItem[];
+  key: string;
+  maxIndexCount: number;
+  maxVertexCount: number;
+  sphereHeightSegments: number;
+  sphereWidthSegments: number;
+}
+
+export function BatchedAtoms({
+  atomOpacity,
+  atoms,
+  colorScheme,
+  colorOverrides,
+  inspectedAtomId,
+  interactionLocked,
+  selectionActivation,
+  materialFamily,
+  meshDetail,
+  onInspect,
+  onPulse,
+  onLockedInteractionAttempt,
+  pulseAtomId,
+  pulseToken,
+  selectionHighlightColor = SELECTION_HIGHLIGHT_COLOR,
+  style,
+}: {
+  atomOpacity: number;
+  atoms: AtomSpec[];
+  colorScheme: StyleState["colorScheme"];
+  colorOverrides?: ElementColorOverrides;
+  inspectedAtomId: string | null;
+  interactionLocked: boolean;
+  selectionActivation: SelectionActivation;
+  materialFamily: ResolvedStructureMaterialFamily;
+  meshDetail: SceneMeshDetail;
+  onInspect?: (atomId: string | null, additive?: boolean) => void;
+  onPulse?: (atomId: string) => void;
+  onLockedInteractionAttempt?: () => void;
+  pulseAtomId: string | null;
+  pulseToken: number;
+  selectionHighlightColor?: string;
+  style: StyleState;
+}) {
+  const meshRef = useRef<BatchedMesh | null>(null);
+  const selection = useSceneSelection();
+  const pickRegistryRef = useRef<BatchPickRegistry<AtomRenderItem>>(
+    createBatchPickRegistry<AtomRenderItem>(),
+  );
+  const populatedBatchMeshRef = useRef<BatchedMesh | null>(null);
+  const populatedBatchKeyRef = useRef<string | null>(null);
+  const invalidate = useThree((state) => state.invalidate);
+  const atomRenderItems = useMemo(
+    () =>
+      createAtomRenderItems({
+        atomOpacity,
+        atoms,
+        colorScheme,
+        colorOverrides,
+        style,
+      }),
+    [atomOpacity, atoms, colorOverrides, colorScheme, style],
+  );
+  const isTransparent = atomRenderItems.some((item) => item.opacity < 1);
+  const itemByAtomId = useMemo(
+    () => atomRenderItemById(atomRenderItems),
+    [atomRenderItems],
+  );
+  const batch = useMemo(
+    () =>
+      createAtomBatchBuild({
+        items: atomRenderItems,
+        sphereHeightSegments: meshDetail.sphereHeightSegments,
+        sphereWidthSegments: meshDetail.sphereWidthSegments,
+      }),
+    [
+      atomRenderItems,
+      meshDetail.sphereHeightSegments,
+      meshDetail.sphereWidthSegments,
+    ],
+  );
+  const inspectedItem = itemForAtomId(itemByAtomId, inspectedAtomId);
+  const selectedItems = useMemo(
+    () => atomRenderItems.filter(item => selection.atoms.has(item.id)),
+    [atomRenderItems, selection.atoms],
+  );
+  const activePulse =
+    pulseAtomId && pulseToken !== 0
+      ? { atomId: pulseAtomId, token: pulseToken }
+      : null;
+  const pulseItem =
+    inspectedItem || !activePulse
+      ? null
+      : itemForAtomId(itemByAtomId, activePulse.atomId);
+  const activeHighlightItem = inspectedItem ?? pulseItem;
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh || !batch) {
+      pickRegistryRef.current = createBatchPickRegistry<AtomRenderItem>();
+      populatedBatchMeshRef.current = null;
+      populatedBatchKeyRef.current = null;
+      return;
+    }
+
+    if (
+      populatedBatchMeshRef.current === mesh &&
+      populatedBatchKeyRef.current === batch.key
+    ) {
+      return;
+    }
+
+    const pickRegistry = createBatchPickRegistry<AtomRenderItem>();
+    populateBatchedAtomMesh(mesh, batch, pickRegistry);
+    pickRegistryRef.current = pickRegistry;
+    populatedBatchMeshRef.current = mesh;
+    populatedBatchKeyRef.current = batch.key;
+    mesh.computeBoundingBox();
+    mesh.computeBoundingSphere();
+    invalidate();
+  }, [batch, invalidate]);
+
+  const atomForEvent = useCallback(
+    (event: ThreeEvent<MouseEvent>) =>
+      itemForBatchId(pickRegistryRef.current, event.batchId)?.atom ?? null,
+    [],
+  );
+
+  const handleClick = useCallback(
+    (event: ThreeEvent<MouseEvent>) => {
+      const atom = atomForEvent(event);
+      if (!atom) {
+        return;
+      }
+
+      event.stopPropagation();
+      const action = selectionPointerAction({
+        activation: selectionActivation,
+        event: "click",
+        interactionLocked,
+        selected: false,
+      });
+      if (action === "locked-feedback") {
+        onLockedInteractionAttempt?.();
+      } else if (action === "select") {
+        onInspect?.(atom.id, event.metaKey || event.ctrlKey);
+      } else if (action === "pulse") {
+        onPulse?.(atom.id);
+      }
+    },
+    [
+      atomForEvent,
+      inspectedAtomId,
+      interactionLocked,
+      onInspect,
+      onLockedInteractionAttempt,
+      onPulse,
+      selectionActivation,
+    ],
+  );
+
+  const handleDoubleClick = useCallback(
+    (event: ThreeEvent<MouseEvent>) => {
+      const atom = atomForEvent(event);
+      if (!atom) {
+        return;
+      }
+
+      event.stopPropagation();
+      const action = selectionPointerAction({
+        activation: selectionActivation,
+        event: "double-click",
+        interactionLocked,
+        selected: atom.id === inspectedAtomId,
+      });
+      if (action === "locked-feedback") {
+        onLockedInteractionAttempt?.();
+      } else if (action === "select") {
+        onInspect?.(atom.id);
+      }
+    },
+    [
+      atomForEvent,
+      inspectedAtomId,
+      interactionLocked,
+      onInspect,
+      onLockedInteractionAttempt,
+      selectionActivation,
+    ],
+  );
+
+  if (!batch) {
+    return null;
+  }
+
+  return (
+    <>
+      <batchedMesh
+        key={batch.key}
+        ref={meshRef}
+        args={[batch.itemCount, batch.maxVertexCount, batch.maxIndexCount]}
+        onClick={handleClick}
+        onDoubleClick={handleDoubleClick}
+        renderOrder={STRUCTURE_RENDER_ORDER.atomMesh}
+      >
+        <StructureMaterial
+          color="#ffffff"
+          // BatchedMesh sorts atoms within this draw list. Depth writes stay on
+          // so atoms keep stable structure-layer occlusion against bonds.
+          depthWrite={true}
+          materialFamily={materialFamily}
+          onBeforeCompile={enableBatchedInstanceRgba}
+          opacity={1}
+          transparent={isTransparent}
+          customProgramCacheKey={batchedInstanceRgbaProgramCacheKey}
+        />
+      </batchedMesh>
+      {activeHighlightItem && !inspectedItem ? (
+        <AtomHighlightAnimator
+          key={[
+            activeHighlightItem.id,
+            inspectedItem ? "selected" : "pulse",
+            inspectedItem ? "" : pulseToken,
+            activeHighlightItem.color,
+          ].join(":")}
+          baseColor={activeHighlightItem.baseColor}
+          inspected={inspectedItem !== null}
+          itemId={activeHighlightItem.id}
+          meshRef={meshRef}
+          pickRegistryRef={pickRegistryRef}
+        />
+      ) : null}
+      {selectedItems.length > 0 ? (
+        <AtomSelectionRimAnimator
+          items={selectedItems}
+          selectionHighlightColor={selectionHighlightColor}
+          sphereHeightSegments={meshDetail.sphereHeightSegments}
+          sphereWidthSegments={meshDetail.sphereWidthSegments}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function createAtomBatchBuild({
+  items,
+  sphereHeightSegments,
+  sphereWidthSegments,
+}: {
+  items: AtomRenderItem[];
+  sphereHeightSegments: number;
+  sphereWidthSegments: number;
+}): AtomBatchBuild | null {
+  if (items.length === 0) {
+    return null;
+  }
+
+  const widthSegments = Math.max(3, Math.floor(sphereWidthSegments));
+  const heightSegments = Math.max(2, Math.floor(sphereHeightSegments));
+  const geometry = atomSphereGeometry(widthSegments, heightSegments);
+  const maxVertexCount = geometry.getAttribute("position").count;
+  const maxIndexCount = geometry.getIndex()?.count ?? maxVertexCount;
+  geometry.dispose();
+
+  return {
+    itemCount: items.length,
+    items,
+    key: atomBatchKey({
+      items,
+      sphereHeightSegments: heightSegments,
+      sphereWidthSegments: widthSegments,
+    }),
+    maxIndexCount,
+    maxVertexCount,
+    sphereHeightSegments: heightSegments,
+    sphereWidthSegments: widthSegments,
+  };
+}
+
+function populateBatchedAtomMesh(
+  mesh: BatchedMesh,
+  batch: AtomBatchBuild,
+  pickRegistry: BatchPickRegistry<AtomRenderItem>,
+) {
+  const matrix = new Matrix4();
+  const position = new Vector3();
+  const scale = new Vector3();
+  const quaternion = new Quaternion();
+  const geometry = prepareBatchGeometry(
+    atomSphereGeometry(batch.sphereWidthSegments, batch.sphereHeightSegments),
+  );
+  const geometryId = mesh.addGeometry(geometry);
+
+  mesh.perObjectFrustumCulled = true;
+  mesh.sortObjects = true;
+
+  for (const item of batch.items) {
+    const batchId = mesh.addInstance(geometryId);
+    position.fromArray(item.position);
+    scale.setScalar(item.radius);
+    matrix.compose(position, quaternion, scale);
+    mesh.setMatrixAt(batchId, matrix);
+    setBatchedInstanceRgba(mesh, batchId, item.baseColor, item.opacity);
+    registerBatchPickItem(pickRegistry, batchId, item);
+  }
+
+  geometry.dispose();
+}
+
+function itemForAtomId(
+  itemByAtomId: Map<string, AtomRenderItem>,
+  atomId: string | null,
+): AtomRenderItem | null {
+  if (!atomId) {
+    return null;
+  }
+
+  return itemByAtomId.get(atomId) ?? null;
+}
+
+function setAtomBatchColor(mesh: BatchedMesh, batchId: number, color: Color) {
+  mesh.setColorAt(batchId, color);
+}
+
+function AtomHighlightAnimator({
+  baseColor,
+  inspected,
+  itemId,
+  meshRef,
+  pickRegistryRef,
+}: {
+  baseColor: Color;
+  inspected: boolean;
+  itemId: string;
+  meshRef: { current: BatchedMesh | null };
+  pickRegistryRef: { current: BatchPickRegistry<AtomRenderItem> };
+}) {
+  const invalidate = useThree((state) => state.invalidate);
+  const startTimeRef = useRef(performance.now());
+  const activeBatchRef = useRef<{ batchId: number; mesh: BatchedMesh } | null>(
+    null,
+  );
+  const isActiveRef = useRef(true);
+
+  useEffect(() => {
+    startTimeRef.current = performance.now();
+    activeBatchRef.current = resolveActiveBatch(
+      meshRef,
+      pickRegistryRef,
+      itemId,
+    );
+    isActiveRef.current = true;
+    invalidate();
+
+    return () => {
+      const activeBatch = activeBatchRef.current;
+      if (activeBatch && meshRef.current === activeBatch.mesh) {
+        setAtomBatchColor(activeBatch.mesh, activeBatch.batchId, baseColor);
+        invalidate();
+      }
+    };
+  }, [baseColor, invalidate, itemId, meshRef, pickRegistryRef]);
+
+  useFrame(() => {
+    if (!isActiveRef.current) {
+      return;
+    }
+
+    let activeBatch = activeBatchRef.current;
+    if (!activeBatch || meshRef.current !== activeBatch.mesh) {
+      activeBatch = resolveActiveBatch(meshRef, pickRegistryRef, itemId);
+      activeBatchRef.current = activeBatch;
+    }
+    if (!activeBatch) {
+      return;
+    }
+
+    const elapsedMs = performance.now() - startTimeRef.current;
+    const durationMs = inspected
+      ? SELECTION_HANDOFF_MS
+      : ATOM_HIGHLIGHT_PULSE_MS;
+    const progress = Math.min(1, elapsedMs / durationMs);
+    const fade = inspected ? easeOutCubic(progress) : atomPulseFade(progress);
+    const targetMix = inspected
+      ? SELECTION_HANDOFF_WHITE_MIX +
+        (ATOM_HIGHLIGHT_SELECTED_COLOR_MIX - SELECTION_HANDOFF_WHITE_MIX) * fade
+      : ATOM_HIGHLIGHT_PULSE_COLOR_MIX * fade;
+    const color = baseColor
+      .clone()
+      .lerp(ATOM_HIGHLIGHT_TARGET_COLOR, targetMix);
+    setAtomBatchColor(activeBatch.mesh, activeBatch.batchId, color);
+
+    if (progress >= 1) {
+      if (!inspected) {
+        setAtomBatchColor(activeBatch.mesh, activeBatch.batchId, baseColor);
+      }
+      isActiveRef.current = false;
+      return;
+    }
+
+    invalidate();
+  });
+
+  return null;
+}
+
+function resolveActiveBatch(
+  meshRef: { current: BatchedMesh | null },
+  pickRegistryRef: { current: BatchPickRegistry<AtomRenderItem> },
+  itemId: string,
+): { batchId: number; mesh: BatchedMesh } | null {
+  const mesh = meshRef.current;
+  const batchId = pickRegistryRef.current.batchIdByItemId.get(itemId);
+  if (!mesh || batchId === undefined) {
+    return null;
+  }
+
+  return { batchId, mesh };
+}
+
+function AtomSelectionRimAnimator({
+  items,
+  selectionHighlightColor,
+  sphereHeightSegments,
+  sphereWidthSegments,
+}: {
+  items: AtomRenderItem[];
+  selectionHighlightColor: string;
+  sphereHeightSegments: number;
+  sphereWidthSegments: number;
+}) {
+  const invalidate = useThree((state) => state.invalidate);
+  const meshRef = useRef<InstancedMesh | null>(null);
+  const materialRef = useRef<ShaderMaterial | null>(null);
+  const startTimeRef = useRef(performance.now());
+  const activeRef = useRef(true);
+  const selectionKey = items.map(item => item.id).join("\0");
+  const uniforms = useMemo(
+    () => ({
+      selectionColor: { value: new Color(SELECTION_HIGHLIGHT_COLOR) },
+      selectionOpacity: { value: 0 },
+    }),
+    [],
+  );
+
+  useEffect(() => {
+    startTimeRef.current = performance.now();
+    activeRef.current = true;
+    invalidate();
+  }, [invalidate, selectionKey]);
+
+  useLayoutEffect(() => {
+    if (!meshRef.current) return;
+    populateAtomSelectionRim(meshRef.current, items);
+    invalidate();
+  }, [invalidate, items]);
+
+  useEffect(() => {
+    uniforms.selectionColor.value.set(selectionHighlightColor);
+    invalidate();
+  }, [invalidate, selectionHighlightColor, uniforms]);
+
+  useFrame(() => {
+    if (!activeRef.current) {
+      return;
+    }
+    const material = materialRef.current;
+    if (!material) {
+      return;
+    }
+
+    const progress = Math.min(
+      1,
+      (performance.now() - startTimeRef.current) / SELECTION_HANDOFF_MS,
+    );
+    material.uniforms.selectionOpacity!.value = easeOutCubic(progress);
+
+    if (progress >= 1) {
+      activeRef.current = false;
+      return;
+    }
+
+    invalidate();
+  });
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[undefined, undefined, items.length]}
+      raycast={ignoreAtomSelectionRimRaycast}
+      renderOrder={STRUCTURE_RENDER_ORDER.atomSelectionRim}
+    >
+      <sphereGeometry args={[1, sphereWidthSegments, sphereHeightSegments]} />
+      <shaderMaterial
+        ref={materialRef}
+        depthWrite={false}
+        fragmentShader={ATOM_SELECTION_RIM_FRAGMENT_SHADER}
+        transparent
+        uniforms={uniforms}
+        vertexShader={ATOM_SELECTION_RIM_VERTEX_SHADER}
+      />
+    </instancedMesh>
+  );
+}
+
+export function populateAtomSelectionRim(mesh: InstancedMesh, items: readonly Pick<AtomRenderItem, "position" | "radius">[]) {
+  const matrix = new Matrix4();
+  items.forEach((item, index) => {
+    const radius = item.radius * 1.04;
+    matrix.makeScale(radius, radius, radius).setPosition(...item.position);
+    mesh.setMatrixAt(index, matrix);
+  });
+  mesh.count = items.length;
+  mesh.instanceMatrix.needsUpdate = true;
+  mesh.computeBoundingBox();
+  mesh.computeBoundingSphere();
+}
+
+function ignoreAtomSelectionRimRaycast() {}
+
+const ATOM_SELECTION_RIM_VERTEX_SHADER = `
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vec4 viewPosition = modelViewMatrix * instanceMatrix * vec4(position, 1.0);
+    vViewPosition = viewPosition.xyz;
+    vViewNormal = normalize(normalMatrix * mat3(instanceMatrix) * normal);
+    gl_Position = projectionMatrix * viewPosition;
+  }
+`;
+
+const ATOM_SELECTION_RIM_FRAGMENT_SHADER = `
+  uniform vec3 selectionColor;
+  uniform float selectionOpacity;
+  varying vec3 vViewNormal;
+  varying vec3 vViewPosition;
+
+  void main() {
+    vec3 viewDirection = normalize(-vViewPosition);
+    float facing = abs(dot(normalize(vViewNormal), viewDirection));
+    float rim = smoothstep(0.20, 0.75, 1.0 - facing);
+    float alpha = rim * selectionOpacity;
+    if (alpha < 0.01) discard;
+    gl_FragColor = vec4(selectionColor, alpha);
+    #include <tonemapping_fragment>
+    #include <colorspace_fragment>
+  }
+`;
+
+function atomSphereGeometry(
+  widthSegments: number,
+  heightSegments: number,
+): SphereGeometry {
+  return new SphereGeometry(1, widthSegments, heightSegments);
+}
+
+function prepareBatchGeometry<TGeometry extends BufferGeometry>(
+  geometry: TGeometry,
+): TGeometry {
+  geometry.computeBoundingBox();
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+function atomBatchKey({
+  items,
+  sphereHeightSegments,
+  sphereWidthSegments,
+}: {
+  items: AtomRenderItem[];
+  sphereHeightSegments: number;
+  sphereWidthSegments: number;
+}): string {
+  let hash = hashString(`${sphereWidthSegments}:${sphereHeightSegments}`);
+  for (const item of items) {
+    hash = hashString(
+      [hash, item.id, item.position.join(","), item.radius, item.color, item.opacity].join(
+        ":",
+      ),
+    );
+  }
+  return `atoms:${items.length}:${hash.toString(36)}`;
+}
+
+function hashString(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}

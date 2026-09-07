@@ -1,0 +1,14 @@
+{
+  "id": "cel-shaded",
+  "label": "赛璐璐",
+  "description": "A single key-light cel transition, continuous fill and a restrained independent highlight.",
+  "material": { "type": "MeshPhongMaterial", "props": { "shininess": 320, "specular": "#888888", "flatShading": false } },
+  "overrides": {
+    "polyhedron": { "material": { "type": "MeshToonMaterial", "props": {} } }
+  },
+  "lighting": [
+    { "type": "AmbientLight", "props": { "intensity": 0.6 } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.7, "offset": [1.5, 1.5, 0] } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.2, "offset": [-1, -1, -2], "fixedDirection": true } }
+  ]
+}

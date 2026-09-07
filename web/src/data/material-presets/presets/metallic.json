@@ -1,0 +1,40 @@
+{
+  "id": "metallic",
+  "label": "Metallic",
+  "description": "A reflective metal-like surface with compact highlights.",
+  "material": {
+    "type": "MeshStandardMaterial",
+    "props": {
+      "metalness": 0.4,
+      "roughness": 0.4,
+      "flatShading": false
+    }
+  },
+  "overrides": {
+    "polyhedron": {
+      "material": {
+        "type": "MeshStandardMaterial",
+        "props": {
+          "metalness": 0.4,
+          "roughness": 0.2,
+          "flatShading": false
+        }
+      }
+    }
+  },
+  "lighting": [
+    {
+      "type": "AmbientLight",
+      "props": {
+        "intensity": 1.0
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 2.5,
+        "offset": [0.3, 0.2, 0]
+      }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "id": "2d",
+  "label": "2D",
+  "description": "Unlit flat color for diagram-like structure views.",
+  "material": {
+    "type": "MeshBasicMaterial",
+    "props": {}
+  },
+  "lighting": [
+    {
+      "type": "AmbientLight",
+      "props": {
+        "intensity": 0.0
+      }
+    }
+  ]
+}

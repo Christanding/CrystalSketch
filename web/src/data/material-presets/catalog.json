@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "defaultPresetId": "cartoon",
+  "presetOrder": ["cartoon", "soft-ceramic", "satin-matte", "cel-shaded", "colored-metal", "soft-jade", "soft-velvet", "modern-matte", "classic-matte", "glossy", "metallic", "2-5d", "2d"]
+}

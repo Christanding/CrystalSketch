@@ -1,0 +1,52 @@
+{
+  "id": "soft-jade",
+  "label": "温润玉石",
+  "description": "Opaque milky surface with a lightweight thickness-guided back-scattering approximation, not emissive glow.",
+  "material": {
+    "type": "MeshPhongMaterial",
+    "props": {
+      "shininess": 85,
+      "specular": "#555555",
+      "flatShading": false
+    }
+  },
+  "overrides": {
+    "polyhedron": {
+      "material": {
+        "type": "MeshToonMaterial",
+        "props": {}
+      }
+    }
+  },
+  "lighting": [
+    {
+      "type": "AmbientLight",
+      "props": {
+        "intensity": 0.6
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 0.7,
+        "offset": [
+          1.5,
+          1.5,
+          0
+        ]
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 0.2,
+        "offset": [
+          -1,
+          -1,
+          -2
+        ],
+        "fixedDirection": true
+      }
+    }
+  ]
+}

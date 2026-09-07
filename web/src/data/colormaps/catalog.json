@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "defaultColorSchemeId": "vesta-soft",
+  "colormaps": [
+    {
+      "id": "sakura-sky",
+      "label": "Sakura Sky",
+      "file": "sakura-sky.json",
+      "tokenElements": ["Si", "O", "N", "Cl"]
+    },
+    {
+      "id": "summer-meadow",
+      "label": "Summer Meadow",
+      "file": "summer-meadow.json",
+      "tokenElements": ["Si", "O", "N", "Cl"]
+    },
+    {
+      "id": "apricot-ice",
+      "label": "Apricot Ice",
+      "file": "apricot-ice.json",
+      "tokenElements": ["Si", "O", "N", "Cl"]
+    },
+    {
+      "id": "iris-apricot",
+      "label": "Iris Apricot",
+      "file": "iris-apricot.json",
+      "tokenElements": ["Si", "O", "N", "Cl"]
+    },
+    {
+      "id": "sea-salt-coral",
+      "label": "Sea Salt Coral",
+      "file": "sea-salt-coral.json",
+      "tokenElements": ["Si", "O", "N", "Cl"]
+    },
+    {
+      "id": "amber-mauve",
+      "label": "Amber Mauve",
+      "file": "amber-mauve.json",
+      "tokenElements": ["Si", "O", "N", "Cl"]
+    },
+    {
+      "id": "carto-pastel",
+      "label": "CARTO Pastel",
+      "file": "carto-pastel.json",
+      "tokenElements": ["Si", "O", "N", "Zn"]
+    },
+    {
+      "id": "nord",
+      "label": "Nord",
+      "file": "nord.json",
+      "tokenElements": ["Si", "O", "N", "Zn"]
+    },
+    {
+      "id": "grand-budapest-2",
+      "label": "Grand Budapest 2",
+      "file": "grand-budapest-2.json",
+      "tokenElements": ["Cu", "Zn", "S", "I"]
+    },
+    {
+      "id": "paul-tol-bright",
+      "label": "Paul Tol Bright",
+      "file": "paul-tol-bright.json",
+      "tokenElements": ["Si", "O", "N", "Zn"]
+    },
+    {
+      "id": "rose-pine-dawn",
+      "label": "Rosé Pine Dawn",
+      "file": "rose-pine-dawn.json",
+      "tokenElements": ["Si", "O", "N", "Zn"]
+    },
+    {
+      "id": "tableau-10",
+      "label": "Tableau 10",
+      "file": "tableau-10.json",
+      "tokenElements": ["Si", "O", "N", "Zn"]
+    },
+    {
+      "id": "moonrise-3",
+      "label": "Moonrise3",
+      "file": "moonrise-3.json",
+      "tokenElements": ["Cu", "I", "Zn", "S"]
+    },
+    {
+      "id": "royal-2",
+      "label": "Royal2",
+      "file": "royal-2.json",
+      "tokenElements": ["Cu", "I", "Zn", "S"]
+    },
+    {
+      "id": "vesta-soft",
+      "label": "VESTA Soft",
+      "file": "vesta-soft.json",
+      "tokenElements": ["H", "C", "N", "O"]
+    },
+    {
+      "id": "vesta",
+      "label": "VESTA",
+      "file": "vesta.json",
+      "tokenElements": ["H", "C", "N", "O"]
+    },
+    {
+      "id": "jmol-soft",
+      "label": "Jmol Soft",
+      "file": "jmol-soft.json",
+      "tokenElements": ["H", "C", "N", "O"]
+    },
+    {
+      "id": "jmol",
+      "label": "Jmol",
+      "file": "jmol.json",
+      "tokenElements": ["H", "C", "N", "O"]
+    }
+  ]
+}

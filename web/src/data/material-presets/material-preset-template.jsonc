@@ -1,0 +1,89 @@
+{
+  "id": "example-preset",
+  "label": "Example Preset",
+  "description": "Copy this shape into presets/*.json and list the id in catalog.json.",
+
+  // Supported material types:
+  // - MeshBasicMaterial
+  // - MeshLambertMaterial
+  // - MeshToonMaterial (runtime three-band gradient)
+  // - MeshStandardMaterial
+  //
+  // Props are passed through to the matching Three.js material. Use official
+  // Three.js property names where possible. JSON can express numbers, booleans,
+  // strings, arrays, and plain objects; runtime objects such as Texture, Color
+  // instances, and Vector classes are not loaded from this template yet. Depth
+  // Depth fading/fog is controlled globally by the scene and should not be set here.
+  "material": {
+    "type": "MeshStandardMaterial",
+    "props": {
+      "flatShading": false,
+      "wireframe": false,
+
+      "metalness": 0.0,
+      "roughness": 0.45,
+
+      // These are supported by Three.js materials, but CrystalSketch scene
+      // objects currently override color, opacity, transparent, depthWrite,
+      // side, and vertexColors so atoms/bonds/polyhedra keep their own state.
+      "emissive": "#000000",
+      "emissiveIntensity": 0.0,
+      "alphaTest": 0.0,
+      "depthTest": true
+    }
+  },
+
+  // Optional per-object material overrides. The selected preset still defines
+  // one visual family; overrides are for local material tuning when an object
+  // type has a different rendering role. Supported targets:
+  // - atom
+  // - bond
+  // - polyhedron
+  //
+  // Same-type overrides merge material props; changing type replaces them,
+  // so Phong-only props do not leak into Toon or other materials.
+  // Lighting stays preset-level and is not overridden per target.
+  "overrides": {
+    "polyhedron": {
+      "material": {
+        "type": "MeshStandardMaterial",
+        "props": {
+          "metalness": 0.06,
+          "roughness": 0.32,
+          "emissive": "#ffffff",
+          "emissiveIntensity": 0.035
+        }
+      }
+    }
+  },
+
+  // Supported light types:
+  // - AmbientLight: official Three.js ambient light props such as color/intensity
+  // - HemisphereLight: skyColor, groundColor, intensity
+  // - cameraDirectional: CrystalSketch camera-relative directional light
+  "lighting": [
+    {
+      "type": "AmbientLight",
+      "props": {
+        "color": "#ffffff",
+        "intensity": 0.8
+      }
+    },
+    {
+      "type": "HemisphereLight",
+      "props": {
+        "skyColor": "#ffffff",
+        "groundColor": "#b8b8b8",
+        "intensity": 0.35
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "color": "#ffffff",
+        "intensity": 2.0,
+        "offset": [0.32, 0.22, 0]
+      }
+    }
+  ]
+}

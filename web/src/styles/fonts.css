@@ -1,0 +1,47 @@
+/* Fast UI subset first; the complete CJK face loads only for additional characters. */
+@font-face {
+  font-family: "LXGW WenKai";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/LXGWWenKai-UI.woff2") format("woff2");
+}
+@font-face {
+  font-family: "LXGW WenKai Full";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../assets/fonts/LXGWWenKai-CJK.woff2") format("woff2");
+}
+@font-face {
+  font-family: "CrystalSketch Numerals";
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url("@fontsource/geist-mono/files/geist-mono-latin-300-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039;
+}
+@font-face {
+  font-family: "CrystalSketch Numerals";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("@fontsource/geist-mono/files/geist-mono-latin-400-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039;
+}
+@font-face {
+  font-family: "CrystalSketch Numerals";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("@fontsource/geist-mono/files/geist-mono-latin-500-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039;
+}
+@font-face {
+  font-family: "CrystalSketch Numerals";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("@fontsource/geist-mono/files/geist-mono-latin-600-normal.woff2") format("woff2");
+  unicode-range: U+0030-0039;
+}

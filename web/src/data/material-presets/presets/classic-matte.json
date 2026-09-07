@@ -1,0 +1,38 @@
+{
+  "id": "classic-matte",
+  "label": "Classic Matte",
+  "description": "Soft diffuse shading close to the original preview look.",
+  "material": {
+    "type": "MeshLambertMaterial",
+    "props": {
+      "flatShading": false
+    }
+  },
+  "overrides": {
+    "polyhedron": {
+      "material": {
+        "type": "MeshStandardMaterial",
+        "props": {
+          "metalness": 0.0,
+          "roughness": 0.4,
+          "flatShading": false
+        }
+      }
+    }
+  },
+  "lighting": [
+    {
+      "type": "AmbientLight",
+      "props": {
+        "intensity": 0.8
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 2.2,
+        "offset": [0.3, 0.2, 0]
+      }
+    }
+  ]
+}

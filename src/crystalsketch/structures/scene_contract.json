@@ -1,0 +1,35 @@
+{
+  "version": 2,
+  "bondFamilyKeySeparator": "|",
+  "structureSizeTiers": {
+    "mediumFromAtomCount": 256,
+    "largeFromAtomCount": 1024
+  },
+  "previewLimits": {
+    "maxUploadBytes": 4194304
+  },
+  "bondAlgorithms": [
+    {
+      "value": "crystal-nn",
+      "pythonLabel": "CrystalNN",
+      "uiLabel": "CrystalNN"
+    },
+    {
+      "value": "minimum-distance",
+      "pythonLabel": "MinimumDistanceNN",
+      "uiLabel": "Minimum distance"
+    },
+    {
+      "value": "cut-off-dict",
+      "pythonLabel": "CutOffDictNN",
+      "uiLabel": "CutOffDictNN"
+    }
+  ],
+  "bondAlgorithmAliases": {
+    "vesta": "cut-off-dict"
+  },
+  "defaultBondAlgorithm": "crystal-nn",
+  "largeStructureBondAlgorithm": "cut-off-dict",
+  "imageReasons": ["boundary", "bonded"],
+  "visibilityDependencies": ["boundaryAtoms", "oneHopBondedAtoms"]
+}

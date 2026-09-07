@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">CrystalSketch</title>
+  <desc id="desc">A copper and mineral-violet crystal cell with ink edges and lattice nodes.</desc>
+  <g stroke="#554959" stroke-width="2.5" stroke-linejoin="round">
+    <path fill="#e2b995" d="M32 6 55 19 32 33 9 19Z"/>
+    <path fill="#cb9673" d="M9 19 32 33V58L9 45Z"/>
+    <path fill="#a99ab9" d="M32 33 55 19V45L32 58Z"/>
+    <g fill="#f7f1e9">
+      <circle cx="32" cy="6" r="3.5"/>
+      <circle cx="9" cy="45" r="3.5"/>
+      <circle cx="55" cy="45" r="3.5"/>
+      <circle cx="32" cy="33" r="4"/>
+    </g>
+  </g>
+</svg>

@@ -1,0 +1,17 @@
+{
+  "id": "soft-ceramic",
+  "label": "柔釉陶瓷",
+  "description": "Soft non-metallic glaze, broad highlights and a fine contour, without transmission or environment textures.",
+  "material": {
+    "type": "MeshPhysicalMaterial",
+    "props": { "metalness": 0, "roughness": 0.32, "clearcoat": 0.4, "clearcoatRoughness": 0.24, "specularIntensity": 0.7 }
+  },
+  "overrides": {
+    "polyhedron": { "material": { "type": "MeshToonMaterial", "props": {} } }
+  },
+  "lighting": [
+    { "type": "AmbientLight", "props": { "intensity": 0.6 } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.7, "offset": [1.5, 1.5, 0] } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.2, "offset": [-1, -1, -2], "fixedDirection": true } }
+  ]
+}

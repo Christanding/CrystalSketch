@@ -1,0 +1,252 @@
+import { describe, expect, test } from "bun:test";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+
+import type { SceneSpec } from "../src/api/scene";
+import { BondsPanel } from "../src/app/inspector/BondsPanel";
+import { useSceneEdits } from "../src/app/hooks/useSceneEdits";
+import {
+  createDefaultBondVisibilityOverrides,
+  createDefaultStyle,
+  setBondFamilyVisible,
+  setBondRelationVisible,
+  type BondVisibilityOverrides,
+  type StyleState,
+} from "../src/model";
+
+describe("BondsPanel", () => {
+  test("uses atom-style family controls and keeps hidden relations in recovery", async () => {
+    const user = userEvent.setup();
+    render(<BondsPanelHarness />);
+
+    const family = screen.getByRole("region", { name: "Na–Cl bonds" });
+    expect(family.className).toContain("rounded-xl");
+    const familyLabel = within(family).getByText("Na").parentElement;
+    expect(familyLabel?.className).toContain("font-semibold");
+    expect(familyLabel?.className).not.toContain("font-mono");
+    expect(within(family).queryByText("2")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Na–Cl radius" }).getAttribute("value")).toBe(
+      "0.15",
+    );
+    expect(screen.getByRole("textbox", { name: "Na–Cl opacity" }).getAttribute("value")).toBe(
+      "100",
+    );
+    for (const input of [
+      screen.getByRole("textbox", { name: "Na–Cl radius" }),
+      screen.getByRole("textbox", { name: "Na–Cl opacity" }),
+    ]) {
+      expect(input.className).toContain("justify-self-center");
+      expect(input.className).toContain("h-[22px]");
+      expect(input.className).toContain("px-1.5");
+      expect(input.className).toContain("text-center");
+      expect(input.className).not.toContain("text-right");
+    }
+
+    await user.click(screen.getByRole("button", { name: "Na:0–Cl:1 visibility" }));
+    await waitFor(() => expect(screen.getByText("Hidden bonds").isConnected).toBe(true));
+    expect(screen.getByRole("button", { name: "Hidden bonds 1" }).getAttribute("aria-expanded"))
+      .toBe("true");
+    expect(screen.getByText("Cl:1 (0, 0, 0)").className).toContain("truncate");
+    expect(screen.queryByRole("button", { name: "Reset Na–Cl" })).toBeNull();
+
+    const restoreButton = screen.getByRole("button", {
+      name: "Restore visibility for Na:0–Cl:1 (0, 0, 0)",
+    });
+    await user.hover(restoreButton);
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Restore visibility");
+    await user.click(restoreButton);
+    await waitFor(() => expect(screen.queryByText("Hidden bonds")).toBeNull());
+
+    await user.click(screen.getByRole("button", { name: "Na–Cl visibility" }));
+    expect(screen.queryByText("Hidden bonds")).toBeNull();
+  });
+
+  test("commits family appearance values without persistent length details", async () => {
+    const user = userEvent.setup();
+    render(<BondsPanelHarness selected={false} />);
+    const family = screen.getByRole("region", { name: "Na–Cl bonds" });
+
+    const radius = screen.getByRole("textbox", { name: "Na–Cl radius" });
+    await user.clear(radius);
+    await user.type(radius, "0.24{Enter}");
+    expect(radius.getAttribute("value")).toBe("0.24");
+
+    expect(family.querySelector('[data-slot="bond-family-details"]')).toBeNull();
+    expect(screen.queryByText("Bond length")).toBeNull();
+  });
+
+  test("clears appearance inputs on focus and restores them on Escape", async () => {
+    const user = userEvent.setup();
+    render(<BondsPanelHarness selected={false} />);
+
+    for (const name of ["Na–Cl radius", "Na–Cl opacity"]) {
+      const input = screen.getByRole("textbox", { name }) as HTMLInputElement;
+      const initialValue = input.value;
+
+      await user.click(input);
+      expect(input.value).toBe("");
+      await user.keyboard("{Escape}");
+      expect(input.value).toBe(initialValue);
+    }
+  });
+
+  test("switches every family row to compact cutoff range controls", async () => {
+    render(<BondsPanelHarness cutoffEditing selected />);
+
+    expect(screen.getByText("Min (Å)").isConnected).toBe(true);
+    expect(screen.getByText("Max (Å)").isConnected).toBe(true);
+    expect(screen.getByRole("textbox", { name: "Minimum cutoff for Na–Cl" }).getAttribute("value"))
+      .toBe("0.000");
+    expect(screen.getByRole("textbox", { name: "Maximum cutoff for Na–Cl" }).getAttribute("value"))
+      .toBe("1.200");
+    expect(
+      screen.getByRole("textbox", { name: "Maximum cutoff for Na–Cl" }).parentElement?.className,
+    ).toContain("bond-family-controls-enter-cutoff");
+    expect(
+      screen.getByRole("textbox", { name: "Maximum cutoff for Na–Cl" }).className,
+    ).toContain("focus-visible:ring-[1px]");
+    expect(
+      screen.getByRole("textbox", { name: "Maximum cutoff for Na–Cl" }).className,
+    ).toContain("text-center");
+    expect(screen.queryByRole("textbox", { name: "Na–Cl radius" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Na:0–Cl:1 radius" })).toBeNull();
+  });
+
+  test("recovers bonds removed with an endpoint and keeps explicitly deleted and hidden bonds distinct", async () => {
+    const user = userEvent.setup();
+    render(<BondsPanelHarness selected={false} initialDeleted={{ atoms: ["Na-0"], bonds: ["bond:two"] }}
+      initialVisibility={{ hiddenFamilies: new Set(), hiddenBondRelations: new Set(["relation:shared"]) }} />);
+    await user.click(screen.getByRole("button", { name: "Deleted bonds 2" }));
+    expect(screen.getByText("Restoring these bonds also restores their deleted endpoint atoms.").isConnected).toBe(true);
+    const restoreEndpoints = screen.getAllByRole("button", { name: "Restore bond Na:0–Cl:1 and its deleted endpoints" });
+    expect(restoreEndpoints).toHaveLength(2);
+    await user.click(restoreEndpoints[0]!);
+    expect(screen.getByRole("button", { name: "Deleted bonds 1" }).isConnected).toBe(true);
+    expect(screen.getByRole("button", { name: "Hidden bonds 1" }).isConnected).toBe(true);
+    expect(screen.queryByText("Restoring these bonds also restores their deleted endpoint atoms.")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Restore bond Na:0–Cl:1" }));
+    expect(screen.queryByText("Deleted bonds")).toBeNull();
+    expect(screen.getByRole("button", { name: "Hidden bonds 1" }).isConnected).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Undo restore" }));
+    expect(screen.getByRole("button", { name: "Deleted bonds 1" }).isConnected).toBe(true);
+  });
+});
+
+function BondsPanelHarness({ cutoffEditing = false, selected = true, initialDeleted, initialVisibility }: {
+  cutoffEditing?: boolean;
+  selected?: boolean;
+  initialDeleted?: { atoms: string[]; bonds: string[] };
+  initialVisibility?: BondVisibilityOverrides;
+}) {
+  const sourceScene = bondScene();
+  const editing = useSceneEdits(sourceScene, 0, initialDeleted ? { deleted: initialDeleted, history: [] } : undefined);
+  const scene = editing.scene!;
+  const [style, setStyle] = useState<StyleState>(createDefaultStyle());
+  const [selectedBondId, setSelectedBondId] = useState<string | null>(
+    selected ? "bond:one" : null,
+  );
+  const [visibility, setVisibility] = useState<BondVisibilityOverrides>(
+    () => initialVisibility ?? createDefaultBondVisibilityOverrides(),
+  );
+  return (
+    <>
+    <BondsPanel
+      bondLocateRequest={null}
+      bondOpacity={100}
+      bondsVisible
+      cutoffDrafts={cutoffEditing ? {
+        "Na|Cl": {
+          initialOverride: false,
+          maxText: "1.200",
+          minText: "0.000",
+          pendingRemoval: false,
+        },
+      } : {}}
+      cutoffEditing={cutoffEditing}
+      invalidCutoffFeedbackPhase={null}
+      invalidCutoffFields={new Set()}
+      isSceneLoading={false}
+      onBondLocateRequestHandled={() => {}}
+      onBondVisibilityChange={(bond, visible) => {
+        setVisibility((current) => setBondRelationVisible(current, bond, visible));
+        if (!visible) setSelectedBondId(null);
+      }}
+      onCutoffDraftChange={() => {}}
+      onCutoffEditorKeyDown={() => {}}
+      onCutoffRestoreToggle={() => {}}
+      onFamilyVisibilityChange={(familyKey, visible) =>
+        setVisibility((current) => setBondFamilyVisible(current, familyKey, visible))
+      }
+      onStyleChange={setStyle}
+      resetToken={0}
+      scene={scene}
+      sourceScene={initialDeleted ? sourceScene : undefined}
+      deletedSelection={initialDeleted ? editing.snapshot.deleted : undefined}
+      onRestoreObjects={editing.restoreObjects}
+      selectedBondId={selectedBondId}
+      style={style}
+      visibilityOverrides={visibility}
+    />
+    {initialDeleted ? <button type="button" onClick={editing.undoDeletion}>Undo restore</button> : null}
+    </>
+  );
+}
+
+function bondScene(): SceneSpec {
+  return {
+    atoms: [atom("Na-0", "Na", 0), atom("Cl-1", "Cl", 1)],
+    bondFamilies: [{ elements: ["Na", "Cl"], key: "Na|Cl", minLength: 1, maxLength: 1.2 }],
+    bonds: [bond("bond:one", 1), bond("bond:two", 1.2)],
+    cell: { vectors: [[1, 0, 0], [0, 1, 0], [0, 0, 1]] },
+    polyhedra: [],
+    summary: {
+      atomCount: 2,
+      cell: { a: "1", alpha: "90", b: "1", beta: "90", c: "1", gamma: "90" },
+      formula: "NaCl",
+      symmetry: {
+        available: false,
+        crystalSystem: null,
+        latticeSystem: null,
+        pointGroup: null,
+        pointGroupSchoenflies: null,
+        spaceGroup: null,
+        spaceGroupNumber: null,
+      },
+    },
+  };
+}
+
+function atom(id: string, element: string, siteIndex: number): SceneSpec["atoms"][number] {
+  return {
+    element,
+    fractionalPosition: [siteIndex, 0, 0],
+    id,
+    imageOffset: [0, 0, 0],
+    imageReasons: [],
+    isPeriodicImage: false,
+    position: [siteIndex, 0, 0],
+    siteId: id,
+    siteIndex,
+    visibilityDependencies: [],
+    visibilityDependencyGroups: [],
+  };
+}
+
+function bond(id: string, length: number): SceneSpec["bonds"][number] {
+  return {
+    endAtomIndex: 1,
+    endImageOffset: [0, 0, 0],
+    endSiteId: "Cl-1",
+    familyKey: "Na|Cl",
+    id,
+    length,
+    relationId: "relation:shared",
+    relativeImageOffset: [0, 0, 0],
+    startAtomIndex: 0,
+    startImageOffset: [0, 0, 0],
+    startSiteId: "Na-0",
+    visibilityDependencies: [],
+    visibilityDependencyGroups: [],
+  };
+}

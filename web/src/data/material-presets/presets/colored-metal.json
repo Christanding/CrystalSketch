@@ -1,0 +1,12 @@
+{
+  "id": "colored-metal",
+  "label": "彩色金属",
+  "description": "Gloss-coated palette-tinted metal, with crisp reflections rather than angle-dependent rainbow colors.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 1, "roughness": 0.3, "clearcoat": 0.12, "clearcoatRoughness": 0.32 } },
+  "overrides": { "polyhedron": { "material": { "type": "MeshToonMaterial", "props": {} } } },
+  "lighting": [
+    { "type": "AmbientLight", "props": { "intensity": 0.6 } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.7, "offset": [1.5, 1.5, 0] } },
+    { "type": "cameraDirectional", "props": { "intensity": 0.2, "offset": [-1, -1, -2], "fixedDirection": true } }
+  ]
+}

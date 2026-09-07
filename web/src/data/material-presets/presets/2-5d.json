@@ -1,0 +1,42 @@
+{
+  "id": "2-5d",
+  "label": "2.5D",
+  "description": "A softly shaded diagram style between flat color and matte 3D.",
+  "material": {
+    "type": "MeshStandardMaterial",
+    "props": {
+      "metalness": 0,
+      "roughness": 0.75,
+      "flatShading": false
+    }
+  },
+  "overrides": {
+    "polyhedron": {
+      "material": {
+        "type": "MeshStandardMaterial",
+        "props": {
+          "metalness": 0.1,
+          "roughness": 0.5,
+          "flatShading": false
+        }
+      }
+    }
+  },
+  "lighting": [
+    {
+      "type": "HemisphereLight",
+      "props": {
+        "skyColor": "#ffffff",
+        "groundColor": "#f0f0f0",
+        "intensity": 1.8
+      }
+    },
+    {
+      "type": "cameraDirectional",
+      "props": {
+        "intensity": 0.9,
+        "offset": [0.3, 0.2, 0]
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+.DS_Store
+.codex/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# uv
+.python-version
+
+# Node / Bun / frontend
+node_modules/
+dist/
+build/
+web/dist/
+.vite/
+.next/
+coverage/
+bun.lockb
+*.tsbuildinfo
+
+# Local QA artifacts
+.playwright-cli/
+output/playwright/
+tmp/
+tmp/visual-renders/
+
+# Local configuration
+.env
+.env.*
+!.env.example
+
+# Editor and OS noise
+.idea/
+.vscode/
+*.swp
+*.swo
