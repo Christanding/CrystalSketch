@@ -1,0 +1,62 @@
+name: GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - web/**
+      - src/crystalsketch/structures/scene_contract.json
+      - pyproject.toml
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  VITE_CRYSTALSKETCH_API_URL: https://crystalsketch-backend-test.vercel.app
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3.13"
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      - run: bun run build
+        working-directory: web
+        env:
+          CRYSTALSKETCH_BASE_PATH: /CrystalSketch/
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: web/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Wait for the cloud API to allow this website
+        run: |
+          curl --fail --silent --show-error --retry 24 --retry-all-errors --retry-delay 5 --max-time 10 \
+            -X OPTIONS \
+            -H 'Origin: https://christanding.github.io' \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type,x-crystalsketch-filename' \
+            "$VITE_CRYSTALSKETCH_API_URL/api/structure-preview"
+      - name: Deploy website
+        id: deployment
+        uses: actions/deploy-pages@v4

@@ -9,7 +9,7 @@ export function CrystalSketchLogo({
     <img
       aria-hidden="true"
       alt=""
-      src="/favicon.svg?v=crystalsketch"
+        src={`${import.meta.env.BASE_URL ?? "/"}favicon.svg?v=crystalsketch`}
       draggable={false}
       className={cn("block", className)}
     />

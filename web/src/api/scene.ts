@@ -1,6 +1,7 @@
 import sceneContract from "../../../src/crystalsketch/structures/scene_contract.json";
 import { isVaspFilename } from "./vasp";
 import { parseVaspFile } from "./vaspWorker";
+import { apiUrl } from "./url";
 import type { SceneMeasurement, MeasurementStyle } from "../model/measurements";
 
 export interface SceneSpec {
@@ -79,11 +80,11 @@ export function readFileSymmetry(file: File, signal?: AbortSignal): Promise<Symm
   signal?.throwIfAborted();
   signal?.addEventListener("abort", abort, { once: true });
   const timeout = setTimeout(() => controller.abort(new DOMException("Symmetry analysis timed out", "TimeoutError")), 15_000);
-  const pending = fetch("/api/structure-symmetry", {
+  const pending = fetch(apiUrl("/api/structure-symmetry"), {
     method: "POST", body: file, signal: controller.signal,
     headers: { "content-type": "application/octet-stream", "x-crystalsketch-filename": encodeURIComponent(file.name) },
   }).then(async response => {
-    if (!response.ok) throw new Error("本地对称性分析服务不可用");
+    if (!response.ok) throw new Error("对称性分析服务不可用");
     return await response.json() as SymmetrySummary;
   }).catch(error => { symmetryByFile.delete(file); throw error; }).finally(() => {
     clearTimeout(timeout);
@@ -235,7 +236,7 @@ export async function uploadStructurePreview(
     throw new StructurePreviewError(BACKEND_UNAVAILABLE_MESSAGE, "backend-unavailable");
   }
 
-  const endpoint = previewEndpointForOptions(options);
+  const endpoint = apiUrl(previewEndpointForOptions(options));
   let response: Response;
   const headers: Record<string, string> = {
     "content-type": file.type || "application/octet-stream",

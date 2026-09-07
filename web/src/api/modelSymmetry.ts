@@ -1,5 +1,6 @@
 import type { PeriodicStructure } from "../model/periodicStructure";
 import type { SymmetrySummary } from "./scene";
+import { apiUrl } from "./url";
 
 export interface ModelSymmetryResult {
   number: number;
@@ -32,7 +33,7 @@ async function request<T>(action: "find" | "impose", structure: PeriodicStructur
   signal: AbortSignal, expectedNumber?: number): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api/model-symmetry/${action}`, { method: "POST", signal,
+    response = await fetch(apiUrl(`/api/model-symmetry/${action}`), { method: "POST", signal,
       headers: { "content-type": "application/json" }, body: JSON.stringify({ structure, symprec, expectedNumber }) });
   } catch (failure) { signal.throwIfAborted(); throw new ModelSymmetryError("unavailable"); }
   if (!response.headers.get("content-type")?.includes("application/json")) throw new ModelSymmetryError("unavailable");

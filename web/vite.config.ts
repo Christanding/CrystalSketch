@@ -25,6 +25,7 @@ function devFaviconPlugin(): Plugin {
 }
 
 export default defineConfig({
+  base: process.env.CRYSTALSKETCH_BASE_PATH ?? "/",
   define: {
     "import.meta.env.VITE_CRYSTALSKETCH_VERSION": JSON.stringify(crystalSketchVersion),
   },

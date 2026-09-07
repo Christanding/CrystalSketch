@@ -1,4 +1,5 @@
 import type { SceneSpec } from "../api/scene";
+import { apiUrl } from "../api/url";
 import { isVaspFilename, parseVaspStructure } from "../api/vasp";
 import type { PeriodicStructure } from "../model/periodicStructure";
 
@@ -84,7 +85,7 @@ export async function readCalculationStructure(file: File, signal?: AbortSignal)
   } else {
     let response: Response;
     try {
-      response = await fetch("/api/structure-data", { method: "POST", body: file, signal,
+      response = await fetch(apiUrl("/api/structure-data"), { method: "POST", body: file, signal,
         headers: { "x-crystalsketch-filename": encodeURIComponent(file.name) } });
     } catch (error) {
       signal?.throwIfAborted();

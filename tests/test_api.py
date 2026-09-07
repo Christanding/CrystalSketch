@@ -531,3 +531,37 @@ async def test_incomplete_static_root_returns_actionable_page(tmp_path) -> None:
         assert response.status_code == 503
         assert "browser files are" in response.text
         assert "missing or incomplete" in response.text
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("origin", "status"),
+    [("https://christanding.github.io", 200), ("https://untrusted.example", 400)],
+)
+async def test_cloud_cors_allows_only_the_pages_origin(origin: str, status: int) -> None:
+    from crystalsketch.server.cloud import app as cloud_app
+
+    async with AsyncClient(
+        transport=ASGITransport(app=cloud_app), base_url="http://testserver"
+    ) as client:
+        response = await client.options(
+            "/api/structure-preview",
+            headers={
+                "Origin": origin,
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": (
+                    "content-type,x-crystalsketch-filename,x-crystalsketch-bond-cutoff-overrides"
+                ),
+            },
+        )
+        assert response.status_code == status
+        assert response.headers.get("access-control-allow-origin") == (
+            origin if status == 200 else None
+        )
+        if status == 200:
+            rejected = await client.post(
+                "/api/structure-preview", content=b"",
+                headers={"Origin": origin, "x-crystalsketch-filename": "invalid.cif"},
+            )
+            assert rejected.status_code == 400
+            assert rejected.headers["access-control-allow-origin"] == origin
