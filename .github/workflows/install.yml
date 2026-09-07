@@ -28,6 +28,13 @@ jobs:
         with:
           bun-version: "1.3.13"
 
+      - name: Use a Windows command path containing spaces and apostrophes
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $toolBin = Join-Path $env:RUNNER_TEMP "Crystal a'a'a commands"
+          "UV_TOOL_BIN_DIR=$toolBin" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
       - name: Install from source (macOS / Linux)
         if: runner.os != 'Windows'
         run: bash scripts/install.sh
@@ -37,6 +44,7 @@ jobs:
         run: powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
 
       - name: Expose the installed global command
+        if: runner.os != 'Windows'
         shell: python {0}
         run: |
           import os
@@ -69,3 +77,16 @@ jobs:
 
       - name: Verify the release installation outside the repository
         run: python scripts/smoke_install.py --work-dir "${{ runner.temp }}"
+
+      - name: Verify Windows repair is persistent and idempotent
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: ${{ runner.temp }}/release-install/CrystalSketch
+        run: |
+          $before = [Environment]::GetEnvironmentVariable('Path', 'User')
+          powershell -ExecutionPolicy Bypass -File .\install.ps1 -RepairPath
+          if ($LASTEXITCODE -ne 0) { throw 'PATH repair failed.' }
+          $after = [Environment]::GetEnvironmentVariable('Path', 'User')
+          if ($before -cne $after) { throw 'Repeated repair changed the saved user PATH.' }
+          $entries = @($after -split ';' | Where-Object { $_ -eq $env:UV_TOOL_BIN_DIR })
+          if ($entries.Count -ne 1) { throw 'The tool directory is missing or duplicated.' }

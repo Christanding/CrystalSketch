@@ -1,7 +1,61 @@
+param([switch]$RepairPath)
+
 $ErrorActionPreference = 'Stop'
+
+function Set-CrystalCommandPath {
+    param([string]$UvExecutable)
+
+    $crystalBinOutput = & $UvExecutable --color never tool dir --bin
+    if ($LASTEXITCODE -ne 0 -or -not $crystalBinOutput) {
+        throw 'Could not locate the installed command directory.'
+    }
+    $crystalBin = $crystalBinOutput.Trim()
+    $crystalExe = Join-Path $crystalBin 'Crystal.exe'
+    if (-not (Test-Path -LiteralPath $crystalExe -PathType Leaf)) {
+        throw 'Crystal.exe was not installed. Check the installation output above.'
+    }
+
+    # Never persist the process PATH: it also contains machine and session-only entries.
+    $userPaths = @(
+        [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
+        Where-Object { $_ }
+    )
+    if ($userPaths -notcontains $crystalBin) {
+        $userPaths = @($crystalBin) + $userPaths
+    }
+    # The User overload also notifies Windows of the environment change.
+    [Environment]::SetEnvironmentVariable('Path', ($userPaths -join ';'), 'User')
+    if (([Environment]::GetEnvironmentVariable('Path', 'User') -split ';') -notcontains $crystalBin) {
+        throw 'The command directory could not be saved to your user PATH.'
+    }
+    if (($env:Path -split ';') -notcontains $crystalBin) {
+        $env:Path = "$crystalBin;$env:Path"
+    }
+
+    # A new shell must find Crystal from persisted PATH, without this installer's additions.
+    $previousExpectedCommand = $env:CRYSTALSKETCH_EXPECTED_COMMAND
+    $env:CRYSTALSKETCH_EXPECTED_COMMAND = $crystalExe
+    try {
+        $probe = @'
+$ErrorActionPreference = 'Stop'
+$env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
+$command = Get-Command Crystal -CommandType Application -ErrorAction Stop
+if ($command.Source -ne $env:CRYSTALSKETCH_EXPECTED_COMMAND) { throw 'Crystal resolves to a different installation.' }
+& $command.Source --version
+exit $LASTEXITCODE
+'@
+        & (Get-Process -Id $PID).Path -NoLogo -NoProfile -NonInteractive -Command $probe
+        if ($LASTEXITCODE -ne 0) { throw 'Crystal could not start using the saved user PATH.' }
+    } finally {
+        $env:CRYSTALSKETCH_EXPECTED_COMMAND = $previousExpectedCommand
+    }
+    Write-Host 'User PATH saved and verified in a new PowerShell process.'
+    Write-Host 'Completely exit Windows Terminal (not just this tab), then reopen it and type Crystal.'
+}
+
 $crystalWheels = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'crystalsketch-*.whl' -File)
 $crystalRoot = Split-Path -Parent $PSScriptRoot
-if ($crystalWheels.Count -eq 0 -and -not (Test-Path (Join-Path $crystalRoot 'pyproject.toml'))) {
+if (-not $RepairPath -and $crystalWheels.Count -eq 0 -and -not (Test-Path (Join-Path $crystalRoot 'pyproject.toml'))) {
     throw 'Extract the complete installer or run this script from the CrystalSketch repository.'
 }
 
@@ -23,6 +77,10 @@ if ($crystalUvCommand) {
 }
 
 $env:PATH = "$(Split-Path -Parent $crystalUv);$env:PATH"
+if ($RepairPath) {
+    Set-CrystalCommandPath -UvExecutable $crystalUv
+    return
+}
 if ($crystalWheels.Count -eq 0) {
     Write-Host 'Installing CrystalSketch from source...'
     if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
@@ -44,6 +102,4 @@ if ($crystalWheels.Count -eq 0) { throw 'The build did not produce an installati
 
 & $crystalUv tool install --python 3.12 --reinstall-package crystalsketch $crystalWheels[0].FullName
 if ($LASTEXITCODE -ne 0) { throw 'CrystalSketch installation failed.' }
-& $crystalUv tool update-shell
-if ($LASTEXITCODE -ne 0) { throw 'Could not configure the command search path.' }
-Write-Host 'Installed. Open a new terminal and type Crystal to launch the app in your browser.'
+Set-CrystalCommandPath -UvExecutable $crystalUv

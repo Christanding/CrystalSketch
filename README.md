@@ -40,6 +40,8 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 首次安装需要联网，安装程序会自动准备 Python 和所需依赖，无需手动安装开发工具或编译项目。安装完成后重新打开终端即可使用，不需要保留源码文件夹。
 
+Windows 安装器会自动将 `Crystal` 的命令目录保存到用户 PATH，并在新 PowerShell 进程中验证。安装后请完全退出 Windows Terminal 再重新打开一次；之后直接输入 `Crystal` 即可，不需要反复修复。
+
 ### 从 GitHub 仓库安装（推荐）
 
 Windows 如果尚未安装 Git，先执行：
@@ -95,6 +97,12 @@ uv tool uninstall crystalsketch
 ### Windows 提示无法识别 Crystal
 
 如果已经安装 CrystalSketch，但输入 `Crystal` 时提示“无法识别”或“不是内部或外部命令”，可能是命令目录尚未加入 PATH，或当前终端尚未刷新环境变量。
+
+新版安装器已自动处理持久化 PATH。旧版用户可以下载最新压缩包并重新运行安装器，或在解压后的文件夹中仅修复命令路径，不重新安装程序：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -RepairPath
+```
 
 在 **PowerShell** 中完整复制并执行一次以下持久化修复命令：
 
