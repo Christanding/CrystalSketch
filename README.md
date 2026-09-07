@@ -96,15 +96,36 @@ uv tool uninstall crystalsketch
 
 如果已经安装 CrystalSketch，但输入 `Crystal` 时提示“无法识别”或“不是内部或外部命令”，可能是命令目录尚未加入 PATH，或当前终端尚未刷新环境变量。
 
-在 **PowerShell** 中执行一次以下通用修复命令：
+在 **PowerShell** 中完整复制并执行一次以下持久化修复命令：
 
 ```powershell
-uv tool update-shell; $env:Path = "$(uv tool dir --bin);$env:Path"; Crystal
+& {
+    $ErrorActionPreference = 'Stop'
+    $crystalBin = (uv tool dir --bin).Trim()
+
+    if (-not (Test-Path -LiteralPath (Join-Path $crystalBin 'Crystal.exe'))) {
+        throw '没有找到 Crystal.exe，请先确认 CrystalSketch 已安装。'
+    }
+
+    $userPaths = @(
+        [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
+        Where-Object { $_ }
+    )
+
+    if ($userPaths -notcontains $crystalBin) {
+        $userPaths = @($crystalBin) + $userPaths
+    }
+
+    [Environment]::SetEnvironmentVariable('Path', ($userPaths -join ';'), 'User')
+    $env:Path = "$crystalBin;$env:Path"
+
+    Crystal
+}
 ```
 
-这条命令会自动读取本机的命令目录，配置后续终端的命令路径，并刷新当前窗口的 PATH 后启动 CrystalSketch。无需手动填写用户名、盘符或安装路径。
+这段命令会自动读取本机的命令目录，将其持久保存到当前用户的 PATH，同时刷新当前窗口并启动 CrystalSketch。它会保留已有的用户 PATH 条目，无需管理员权限，也无需手动填写用户名、盘符或安装路径。
 
-修复后，日常直接输入 `Crystal` 即可。如果其他已打开的终端仍无法识别，请完全关闭终端程序后重新打开，而不只是新建标签页。
+修复后，日常直接输入 `Crystal` 即可，不需要每次重新执行修复。如果终端仍沿用旧环境，请完全退出 Windows Terminal 后重新打开，而不只是新建标签页；仍未刷新时，可注销并重新登录 Windows 一次。
 
 此命令用于修复已安装程序的命令路径，不能替代安装。如果 `uv` 也无法识别，或 `uv tool list` 中没有 `crystalsketch`，请先按上面的安装步骤完成安装。
 
