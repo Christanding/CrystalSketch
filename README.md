@@ -82,6 +82,18 @@ Crystal
 
 使用期间保持启动终端运行。结束后，在该终端按 `Ctrl+C` 停止程序；下次使用只需再次执行启动命令，无需重新安装。
 
+## 卸载
+
+先在运行 CrystalSketch 的终端按 `Ctrl+C` 停止程序，再使用安装时的系统账号执行：
+
+```sh
+uv tool uninstall crystalsketch
+```
+
+Windows、macOS 和 Linux 使用同一条命令。它会移除 CrystalSketch 的独立运行环境及 `Crystal` 启动命令，不会卸载 uv、Git 或其他 uv 工具。
+
+已导出的图片、结构文件、下载的安装包、克隆的源码文件夹和浏览器保存的工作区不会被删除。
+
 ## 常见问题
 
 ### Windows 提示无法识别 Crystal
