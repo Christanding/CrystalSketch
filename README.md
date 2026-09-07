@@ -74,4 +74,4 @@ Crystal
 
 使用期间保持启动终端运行。结束后，在该终端按 `Ctrl+C` 停止程序；下次使用只需再次执行启动命令，无需重新安装。
 
-本项目采用 [MIT 许可证](LICENSE)。第三方配色来源见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)，字体许可随安装包保留。
+本项目采用 [MIT 许可证](LICENSE)。
