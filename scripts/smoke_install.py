@@ -60,13 +60,30 @@ def main() -> None:
     repository = Path(__file__).resolve().parents[1]
     if args.work_dir.resolve().is_relative_to(repository):
         raise SystemExit("The smoke test work directory must be outside the repository")
-    command = shutil.which("Crystal")
-    if not command or Path(command).resolve().is_relative_to(repository):
-        raise SystemExit("Crystal must be installed globally and available on PATH")
     environment = dict(
         os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8", NO_COLOR="1", COLUMNS="160"
     )
     environment.pop("PYTHONPATH", None)
+    if os.name == "nt":
+        import winreg
+
+        def registry_path(hive, key: str) -> str:
+            try:
+                with winreg.OpenKey(hive, key) as entry:
+                    return str(winreg.QueryValueEx(entry, "Path")[0])
+            except FileNotFoundError:
+                return ""
+
+        # Ignore GITHUB_PATH and the installer's transient PATH, as on a fresh login.
+        machine = registry_path(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        )
+        user = registry_path(winreg.HKEY_CURRENT_USER, "Environment")
+        environment["PATH"] = os.path.expandvars(machine + ";" + user)
+    command = shutil.which("Crystal", path=environment.get("PATH"))
+    if not command or Path(command).resolve().is_relative_to(repository):
+        raise SystemExit("Crystal must be installed globally and available on persisted PATH")
     with tempfile.TemporaryDirectory(prefix="crystalsketch-smoke-", dir=args.work_dir) as work:
         log_path = Path(work) / "server.log"
         with log_path.open("w", encoding="utf-8") as log:

@@ -48,3 +48,6 @@ def test_install_bundle_contains_wheel_launchers_and_user_instructions(tmp_path:
             "CrystalSketch/THIRD_PARTY_NOTICES.md", "CrystalSketch/font-licenses.txt",
         }
         assert bundle.read(f"CrystalSketch/{wheel.name}") == b"wheel"
+        assert bundle.read("CrystalSketch/install.ps1") == (
+            Path(__file__).parents[1] / "scripts" / "install.ps1"
+        ).read_bytes()

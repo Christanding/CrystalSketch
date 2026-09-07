@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
+from crystalsketch import __version__
 from crystalsketch.server.prewarm import start_structure_preview_prewarm
 from crystalsketch.server.routes import router
 
@@ -23,7 +24,7 @@ def create_app(
     prewarm_structure_stack: bool = True,
 ) -> FastAPI:
     lifespan = _lifespan if prewarm_structure_stack else None
-    app = FastAPI(title="CrystalSketch", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="CrystalSketch", version=__version__, lifespan=lifespan)
     app.add_middleware(
         GZipMiddleware,
         minimum_size=RESPONSE_GZIP_MINIMUM_SIZE,
