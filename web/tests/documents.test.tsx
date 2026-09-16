@@ -1,10 +1,11 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { expect, spyOn, test } from "bun:test";
 import { StrictMode, useLayoutEffect } from "react";
 import { Quaternion, Vector3 } from "three";
 import { parseVaspScene, parseVaspStructure } from "../src/api/vasp";
-import { createDocumentWorkspace } from "../src/app/documentState";
-import { createEmptyManifest, DOCUMENT_MANIFEST_KEY, durableWorkspaceManifest, loadDocuments, parseWorkspaceManifest, saveModelWorkspace, saveWorkspaceManifest } from "../src/app/documentStorage";
+import { createDocumentWorkspace, type DocumentEditorProps } from "../src/app/documentState";
+import { DocumentWorkspace } from "../src/app/DocumentWorkspace";
+import { awaitDocumentSaves, createEmptyManifest, DOCUMENT_MANIFEST_KEY, durableWorkspaceManifest, loadDocuments, parseWorkspaceManifest, saveModelWorkspace, saveWorkspaceManifest } from "../src/app/documentStorage";
 import * as documentStorage from "../src/app/documentStorage";
 import { useWorkspacePersistence } from "../src/app/hooks/useWorkspacePersistence";
 import type { LoadedPreviewSession } from "../src/app/hooks/useStructurePreview";
@@ -24,7 +25,9 @@ test("multi-document manifest rejects duplicate identities and invalid compare t
   const state = { ...createEmptyManifest(), documents: [{ id: "a", title: "POSCAR" }, { id: "b", title: "POSCAR" }], activeId: "a", compareIds: ["a", "b"] as [string, string] };
   expect(parseWorkspaceManifest(JSON.stringify(state))).toEqual(state);
   expect(parseWorkspaceManifest(JSON.stringify({ ...state, leftSidebarOpen: false })).leftSidebarOpen).toBe(false);
+  expect(parseWorkspaceManifest(JSON.stringify({ ...state, rightSidebarOpen: true })).rightSidebarOpen).toBe(true);
   expect(() => parseWorkspaceManifest(JSON.stringify({ ...state, leftSidebarOpen: "false" }))).toThrow();
+  expect(() => parseWorkspaceManifest(JSON.stringify({ ...state, rightSidebarOpen: "true" }))).toThrow();
   for (const patch of [{ activeId: "missing" }, { compareIds: ["a", "a"] }, { compareIds: ["a", "missing"] }, { documents: [state.documents[0], state.documents[0]] }]) {
     expect(() => parseWorkspaceManifest(JSON.stringify({ ...state, ...patch }))).toThrow();
   }
@@ -47,6 +50,24 @@ test("new documents inherit visual style without copying site IDs, visibility, m
   expect(next.preferences.sessionId).toBe("next");
 });
 
+test("the workspace restores an explicitly closed sidebar even when the active document is a model", () => {
+  const storage = mockDocumentDatabase();
+  const savedManifest = localStorage.getItem(DOCUMENT_MANIFEST_KEY);
+  const model = modelWorkspace("workspace-sidebar-model", 0);
+  const legacy = mountFlushWorkspace([model]);
+  try {
+    expect(legacy.controls().rightSidebarOpen).toBe(true);
+    act(() => legacy.controls().onRightSidebarOpenChange(false));
+    expect(legacy.controls().rightSidebarOpen).toBe(false);
+    const saved = parseWorkspaceManifest(localStorage.getItem(DOCUMENT_MANIFEST_KEY)!);
+    expect(saved.rightSidebarOpen).toBe(false);
+    legacy.unmount();
+    const restored = mountFlushWorkspace([model], saved.rightSidebarOpen);
+    try { expect(restored.controls().rightSidebarOpen).toBe(false); }
+    finally { restored.unmount(); }
+  } finally { legacy.unmount(); storage.restore(); restoreLocalStorage(DOCUMENT_MANIFEST_KEY, savedManifest); }
+});
+
 test("a failed new document save cannot keep closed documents in the durable manifest", () => {
   const state = { ...createEmptyManifest(), documents: [{ id: "kept", title: "CONTCAR" }, { id: "unsaved", title: "POSCAR" }], activeId: "unsaved", compareIds: ["kept", "unsaved"] as [string, string] };
   const durable = durableWorkspaceManifest(state, new Set(["closed", "kept"]));
@@ -54,6 +75,93 @@ test("a failed new document save cannot keep closed documents in the durable man
   expect(durable.activeId).toBe("kept");
   expect(durable.compareIds).toBeNull();
   expect(parseWorkspaceManifest(JSON.stringify(durable))).toEqual(durable);
+});
+
+test("update flush awaits hidden pending models and the latest source snapshot before committing the full manifest", async () => {
+  const storage = mockDocumentDatabase(false);
+  const source = createDocumentWorkspace(session("update-flush-source"));
+  const hidden = modelWorkspace("update-flush-hidden", 1);
+  const savedManifest = localStorage.getItem(DOCUMENT_MANIFEST_KEY);
+  const preferenceKey = `crystalsketch.document.${source.session.id}`;
+  const savedPreferences = localStorage.getItem(preferenceKey);
+  const workspace = mountFlushWorkspace([source, hidden]);
+  try {
+    const newerHidden = modelWorkspace(hidden.session.id, 3);
+    const pendingHidden = saveModelWorkspace(newerHidden);
+    await settleMicrotasks();
+    workspace.snapshots.set(source.session.id, { ...source,
+      preferences: { ...source.preferences, viewScale: 2.75, viewPan: [1, 2, 3] } });
+    let finished = false;
+    const flush = workspace.controls().onFlushWorkspace().then(() => { finished = true; });
+    await settleMicrotasks();
+    expect(finished).toBe(false);
+    expect(storage.writes).toHaveLength(1);
+    storage.completeNext();
+    await settleMicrotasks();
+    expect(storage.writes.map(write => write.key)).toEqual([`document:${hidden.session.id}`, `document:${source.session.id}`]);
+    expect(finished).toBe(false);
+    expect(localStorage.getItem(DOCUMENT_MANIFEST_KEY)).toBe(savedManifest);
+    storage.completeNext();
+    await act(async () => { await Promise.all([pendingHidden, flush]); });
+    expect(finished).toBe(true);
+    const restored = await loadDocuments();
+    expect(restored.manifest.documents.map(document => document.id)).toEqual([source.session.id, hidden.session.id]);
+    expect(restored.documents[0]!.preferences.viewScale).toBe(2.75);
+    expect(restored.documents[0]!.preferences.viewPan).toEqual([1, 2, 3]);
+    expect(restored.documents[1]!.session.model!.revision).toBe(3);
+    expect(restored.documents[1]!.preferences.poscarDraft!.text).toBe("draft-3");
+  } finally {
+    workspace.unmount(); storage.restore();
+    restoreLocalStorage(DOCUMENT_MANIFEST_KEY, savedManifest);
+    restoreLocalStorage(preferenceKey, savedPreferences);
+  }
+});
+
+test("update flush rejects aborted writes and unavailable storage instead of reporting a saved workspace", async () => {
+  const storage = mockDocumentDatabase(false);
+  const source = createDocumentWorkspace(session("update-flush-failure"));
+  const savedManifest = localStorage.getItem(DOCUMENT_MANIFEST_KEY);
+  const workspace = mountFlushWorkspace([source]);
+  try {
+    const flush = workspace.controls().onFlushWorkspace().catch(error => error);
+    await settleMicrotasks();
+    storage.abortNextWrite = true;
+    await act(async () => { storage.completeNext(); expect(await flush).toBeInstanceOf(Error); });
+    expect(storage.records.has(`document:${source.session.id}`)).toBe(false);
+    expect(localStorage.getItem(DOCUMENT_MANIFEST_KEY)).toBe(savedManifest);
+    storage.restore();
+    await act(async () => {
+      await expect(workspace.controls().onFlushWorkspace()).rejects.toThrow("Workspace storage is unavailable.");
+    });
+  } finally { workspace.unmount(); storage.restore(); restoreLocalStorage(DOCUMENT_MANIFEST_KEY, savedManifest); }
+});
+
+test("update flush cannot resurrect a document closed during its source write", async () => {
+  const storage = mockDocumentDatabase(false);
+  const source = createDocumentWorkspace(session("update-flush-closing"));
+  const savedManifest = localStorage.getItem(DOCUMENT_MANIFEST_KEY);
+  const preferenceKey = `crystalsketch.document.${source.session.id}`;
+  const savedPreferences = localStorage.getItem(preferenceKey);
+  const workspace = mountFlushWorkspace([source]);
+  try {
+    const flush = workspace.controls().onFlushWorkspace();
+    await settleMicrotasks();
+    let closing!: Promise<void>;
+    act(() => { closing = workspace.controls().onClose(); });
+    await settleMicrotasks();
+    expect(parseWorkspaceManifest(localStorage.getItem(DOCUMENT_MANIFEST_KEY)!).documents).toEqual([]);
+    storage.completeNext();
+    await act(async () => { await flush; });
+    expect(localStorage.getItem(preferenceKey)).toBeNull();
+    storage.completeNext();
+    await act(async () => { await closing; });
+    expect(storage.records.has(`document:${source.session.id}`)).toBe(false);
+    expect((await loadDocuments()).documents).toEqual([]);
+  } finally {
+    workspace.unmount(); storage.restore();
+    restoreLocalStorage(DOCUMENT_MANIFEST_KEY, savedManifest);
+    restoreLocalStorage(preferenceKey, savedPreferences);
+  }
 });
 
 test("actual visibility controls share deletion undo order without reverting later colors", () => {
@@ -210,12 +318,13 @@ test("in-flight model saves serialize and coalesce pending revisions, including 
     await settleMicrotasks();
     const middle = saveModelWorkspace(modelWorkspace(id, 2));
     const latest = saveModelWorkspace(modelWorkspace(id, 3));
+    const queued = awaitDocumentSaves([id]);
     expect(storage.writes).toHaveLength(1);
     storage.completeNext();
     await settleMicrotasks();
     expect(storage.writes.map(write => write.record.model!.revision)).toEqual([1, 3]);
     storage.completeNext();
-    await Promise.all([first, middle, latest]);
+    await Promise.all([first, middle, latest, queued]);
     const record = storage.records.get(`document:${id}`)!;
     expect(record.model!.revision).toBe(3);
     expect(parseWorkspacePreferences(record.savedPreferences!)!.edits.history).toHaveLength(3);
@@ -271,6 +380,33 @@ function modelWorkspace(id: string, revision: number): SavedWorkspace {
   workspace.preferences.edits.history = Array.from({ length: revision }, (_, index) => ({ kind: "delete" as const,
     before: { atoms: [], bonds: [] }, after: { atoms: [], bonds: [`bond-${index}`] } }));
   return workspace;
+}
+
+function mountFlushWorkspace(initialDocuments: SavedWorkspace[], rightSidebarOpen?: boolean) {
+  const snapshots = new Map(initialDocuments.map(workspace => [workspace.session.id, workspace]));
+  let current: DocumentEditorProps | undefined;
+  function Editor(props: DocumentEditorProps) {
+    if (props.initialWorkspace) current = props;
+    const id = props.initialWorkspace?.session.id;
+    useLayoutEffect(() => {
+      if (!id) return;
+      return props.register(id, { snapshot: () => snapshots.get(id) ?? null,
+        closeColorPicker: () => {}, applyAppearance: () => {}, isBusy: () => false });
+    }, [id, props.register]);
+    return null;
+  }
+  const manifest = { ...createEmptyManifest(), activeId: initialDocuments[0]!.session.id,
+    ...(rightSidebarOpen === undefined ? {} : { rightSidebarOpen }),
+    documents: initialDocuments.map(workspace => ({ id: workspace.session.id, title: workspace.session.fileName })) };
+  const mounted = render(<DocumentWorkspace initial={{ manifest, documents: initialDocuments }} restoreFailed={false} editor={Editor} />);
+  return { snapshots, unmount: mounted.unmount, controls: () => {
+    if (!current) throw new Error("The test document editor did not mount.");
+    return current;
+  } };
+}
+
+function restoreLocalStorage(key: string, value: string | null) {
+  if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value);
 }
 
 async function settleMicrotasks() { for (let index = 0; index < 8; index++) await Promise.resolve(); }

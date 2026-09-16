@@ -400,6 +400,34 @@ describe("App", () => {
     expect(within(tabs).queryByRole("tab", { name: "second.cif" })).toBeNull();
   });
 
+  test("keeps the workspace sidebar open and closed across file switches while its content follows the active document", async () => {
+    const user = userEvent.setup();
+    await renderLoadedStructure(user);
+    await user.click(screen.getByRole("button", { name: "Sidebar" }));
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    await user.click(within(sidebar).getByRole("tab", { name: "Objects" }));
+    queueFetchResponse(jsonResponse(sceneWithPeriodicImages()));
+    await user.upload(getFileInput(), structureFile("second.cif"));
+    const tabs = screen.getByRole("tablist", { name: "Structures" });
+    await within(tabs).findByRole("tab", { name: "second.cif" });
+    expect(screen.getByRole("button", { name: "Sidebar" }).getAttribute("aria-expanded")).toBe("true");
+    const secondSidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    expect(secondSidebar).not.toBe(sidebar);
+    expect(sidebar.isConnected).toBe(false);
+    expect(within(secondSidebar).getByRole("tab", { name: "Settings" }).getAttribute("aria-selected")).toBe("true");
+    expect(within(screen.getByRole("complementary", { name: "Current structure" })).getByText("second.cif")).toBeTruthy();
+    await user.click(within(tabs).getByRole("tab", { name: "NaCl.cif" }));
+    expect(screen.getByRole("button", { name: "Sidebar" }).getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByRole("complementary", { name: "Sidebar" })).not.toBe(secondSidebar);
+    expect(within(screen.getByRole("complementary", { name: "Current structure" })).getByText("NaCl.cif")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Sidebar" }));
+    for (const name of ["second.cif", "NaCl.cif"]) {
+      await user.click(within(tabs).getByRole("tab", { name }));
+      expect(screen.getByRole("button", { name: "Sidebar" }).getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByRole("complementary", { name: "Sidebar" })).toBeNull();
+    }
+  });
+
   test("starts with an empty preview and a compact structure card", () => {
     render(<App />);
 

@@ -19,6 +19,8 @@ export interface DocumentEditorProps {
   initialWorkspace: SavedWorkspace | null;
   leftSidebarOpen: boolean;
   onLeftSidebarOpenChange: (open: boolean) => void;
+  rightSidebarOpen: boolean;
+  onRightSidebarOpenChange: (open: boolean) => void;
   active: boolean;
   comparison: boolean;
   comparisonControls?: ReactNode;
@@ -29,6 +31,7 @@ export interface DocumentEditorProps {
   onActivate: () => void;
   onOpen: () => void;
   onCreateModel?: (model: ModelState, scene: SceneSpec) => Promise<void>;
+  onFlushWorkspace: () => Promise<void>;
   onClose: () => Promise<void>;
   register: (id: string, handle: DocumentEditorHandle) => () => void;
 }

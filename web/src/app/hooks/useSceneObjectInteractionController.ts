@@ -30,6 +30,8 @@ type PulsedSceneObject = Exclude<InspectedSceneObject, null> & { token: number }
 interface SceneObjectInteractionControllerOptions {
   active?: boolean;
   initialInspectorTab?: InspectorSidebarTab;
+  isInspectorOpen: boolean;
+  onInspectorOpenChange: (open: boolean) => void;
   deleteObjects: (selection: SceneSelection) => void;
   undoDeletion: () => boolean;
   redoDeletion?: () => boolean;
@@ -45,6 +47,8 @@ interface SceneObjectInteractionControllerOptions {
 export function useSceneObjectInteractionController({
   active = true,
   initialInspectorTab,
+  isInspectorOpen,
+  onInspectorOpenChange,
   deleteObjects,
   undoDeletion,
   redoDeletion,
@@ -56,7 +60,9 @@ export function useSceneObjectInteractionController({
   setBondVisible,
   visibleScene,
 }: SceneObjectInteractionControllerOptions) {
-  const [isInspectorOpen, setIsInspectorOpen] = useState(Boolean(initialInspectorTab));
+  const inspectorOpenChange = useRef(onInspectorOpenChange);
+  inspectorOpenChange.current = onInspectorOpenChange;
+  const setIsInspectorOpen = useCallback((open: boolean) => inspectorOpenChange.current(open), []);
   const [activeInspectorTab, setActiveInspectorTab] =
     useState<InspectorSidebarTab>(initialInspectorTab ?? "settings");
   const [activeObjectsTab, setActiveObjectsTab] =
@@ -133,7 +139,7 @@ export function useSceneObjectInteractionController({
     setBondLocateRequest(null);
     setBondObjectsResetToken((token) => token + 1);
     if (!preserveInspectorOpen) setIsInspectorOpen(false);
-  }, [clearSelection]);
+  }, [clearSelection, setIsInspectorOpen]);
 
   useEffect(() => {
     inspectedSceneObjectRef.current = inspectedSceneObject;
@@ -242,7 +248,7 @@ export function useSceneObjectInteractionController({
   const handleInspectorOpenChange = useCallback((isOpen: boolean) => {
     if (!isOpen) closeActiveColorPicker();
     setIsInspectorOpen(isOpen);
-  }, [closeActiveColorPicker]);
+  }, [closeActiveColorPicker, setIsInspectorOpen]);
 
   const handleActiveInspectorTabChange = useCallback((tab: InspectorSidebarTab) => {
     closeActiveColorPicker();
@@ -268,7 +274,7 @@ export function useSceneObjectInteractionController({
     setActiveInspectorTab("objects");
     setActiveObjectsTab("atoms");
     requestAtomLocateInObjects(atomId);
-  }, [closeActiveColorPicker, requestAtomLocateInObjects]);
+  }, [closeActiveColorPicker, requestAtomLocateInObjects, setIsInspectorOpen]);
 
   const handleLocateBondInObjects = useCallback((bondId: string) => {
     closeActiveColorPicker();
@@ -276,7 +282,7 @@ export function useSceneObjectInteractionController({
     setActiveInspectorTab("objects");
     setActiveObjectsTab("bonds");
     requestBondLocateInObjects(bondId);
-  }, [closeActiveColorPicker, requestBondLocateInObjects]);
+  }, [closeActiveColorPicker, requestBondLocateInObjects, setIsInspectorOpen]);
 
   const handleHideAtom = useCallback((atomId: string) => {
     hideAtom(atomId);

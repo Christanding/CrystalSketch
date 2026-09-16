@@ -10,6 +10,7 @@ export interface WorkspaceManifest {
   syncRotation: boolean;
   uniformScale: boolean;
   leftSidebarOpen?: boolean;
+  rightSidebarOpen?: boolean;
 }
 export interface StoredDocuments { manifest: WorkspaceManifest; documents: SavedWorkspace[] }
 export const DOCUMENT_MANIFEST_KEY = "crystalsketch.documents.v2";
@@ -47,7 +48,8 @@ export function parseWorkspaceManifest(value: string): WorkspaceManifest {
     || state.documents.some(doc => !doc || typeof doc.id !== "string" || typeof doc.title !== "string")
     || new Set(state.documents.map(doc => doc.id)).size !== state.documents.length
     || typeof state.syncRotation !== "boolean" || typeof state.uniformScale !== "boolean"
-    || state.leftSidebarOpen !== undefined && typeof state.leftSidebarOpen !== "boolean") throw new Error("Invalid document workspace.");
+    || state.leftSidebarOpen !== undefined && typeof state.leftSidebarOpen !== "boolean"
+    || state.rightSidebarOpen !== undefined && typeof state.rightSidebarOpen !== "boolean") throw new Error("Invalid document workspace.");
   const ids = new Set(state.documents.map(doc => doc.id));
   if (state.activeId !== null && !ids.has(state.activeId)
     || state.documents.length > 0 && state.activeId === null
@@ -121,6 +123,16 @@ export async function saveModelWorkspace(workspace: SavedWorkspace) {
   modelSaves.set(id, queue);
   queue.completion = drainModelSaves(id, queue);
   return queue.completion;
+}
+
+/** Wait for existing model queues without replacing a newer pending snapshot. */
+export async function awaitDocumentSaves(ids: readonly string[]): Promise<void> {
+  while (true) {
+    const pending = ids.map(id => modelSaves.get(id)?.completion)
+      .filter((save): save is Promise<void> => Boolean(save));
+    if (!pending.length) return;
+    await Promise.all(pending);
+  }
 }
 
 async function drainModelSaves(id: string, queue: ModelSaveQueue) {

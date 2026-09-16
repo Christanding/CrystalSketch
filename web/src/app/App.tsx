@@ -127,7 +127,7 @@ export function App() {
   );
 }
 
-function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange, active, comparison, comparisonControls, canCompare, onToggleCompare, controlsHost, comparisonCameraStore, onActivate, onOpen, onCreateModel, onClose, register }: DocumentEditorProps) {
+function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange, rightSidebarOpen, onRightSidebarOpenChange, active, comparison, comparisonControls, canCompare, onToggleCompare, controlsHost, comparisonCameraStore, onActivate, onOpen, onCreateModel, onClose, register }: DocumentEditorProps) {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
   const { reducedMotion } = useMotion();
@@ -235,6 +235,8 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
   useLayoutEffect(() => editing.registerVisibilityRestore(appearance.restoreVisibilityState), [editing.registerVisibilityRestore, appearance.restoreVisibilityState]);
   const interaction = useSceneObjectInteractionController({
     active,
+    isInspectorOpen: rightSidebarOpen,
+    onInspectorOpenChange: onRightSidebarOpenChange,
     initialInspectorTab: initialWorkspace?.session.model ? "modeling" : undefined,
     deleteObjects: safeDelete,
     undoDeletion: safeUndo,

@@ -107,6 +107,7 @@ test("model edits retain existing selected sites and update the focused atom's e
   const firstId = model.structure.sites[0]!.siteId;
   const secondId = model.structure.sites[1]!.siteId;
   const { result, rerender } = renderHook(({ scene }) => useSceneObjectInteractionController({
+    isInspectorOpen: false, onInspectorOpenChange() {},
     visibleScene: scene, componentVisibility: createDefaultComponentVisibility(), connectivityStatus: "ready",
     deleteObjects() {}, undoDeletion: () => false, closeActiveColorPicker() {}, hideAtom() {},
     requestConnectivity: async () => true, setBondVisible() {},
@@ -139,6 +140,7 @@ test("vacancy prunes only absent atoms and incident bonds, keeping the remaining
   expect(removedBond).toBeDefined();
   expect(keptBond).toBeDefined();
   const { result, rerender } = renderHook(({ visibleScene }) => useSceneObjectInteractionController({
+    isInspectorOpen: false, onInspectorOpenChange() {},
     visibleScene, componentVisibility: createDefaultComponentVisibility(), connectivityStatus: "ready",
     deleteObjects() {}, undoDeletion: () => false, closeActiveColorPicker() {}, hideAtom() {},
     requestConnectivity: async () => true, setBondVisible() {},
@@ -159,6 +161,7 @@ test("moving a boundary site removes an undrawn selected image without dropping 
   const image = scene.atoms.find(atom => atom.siteId === siteId && atom.isPeriodicImage)!;
   expect(image).toBeDefined();
   const { result, rerender } = renderHook(({ visibleScene }) => useSceneObjectInteractionController({
+    isInspectorOpen: false, onInspectorOpenChange() {},
     visibleScene, componentVisibility: createDefaultComponentVisibility(), connectivityStatus: "ready",
     deleteObjects() {}, undoDeletion: () => false, closeActiveColorPicker() {}, hideAtom() {},
     requestConnectivity: async () => true, setBondVisible() {},
@@ -333,7 +336,7 @@ test("routes delete, undo, redo, and hide shortcuts only to the active view", ()
   const hidden = { left: [] as string[], right: [] as string[] };
   const { result, rerender } = renderHook(({ active }: { active: "left" | "right" | null }) => {
     const leftEdits = useSceneEdits(scene, 0), rightEdits = useSceneEdits(scene, 0);
-    const base = { closeActiveColorPicker() {}, componentVisibility: createDefaultComponentVisibility(),
+    const base = { isInspectorOpen: false, onInspectorOpenChange() {}, closeActiveColorPicker() {}, componentVisibility: createDefaultComponentVisibility(),
       connectivityStatus: "ready" as const, requestConnectivity: async () => true, setBondVisible() {} };
     const left = useSceneObjectInteractionController({ ...base, active: active === "left", ...leftEdits,
       visibleScene: leftEdits.scene, hideAtom: id => hidden.left.push(id) });
@@ -395,6 +398,7 @@ test("the card delete action uses the latest mixed selection and exact periodic 
   const { result, rerender } = renderHook(({ active }) => {
     const editing = useSceneEdits(scene, 0);
     const interaction = useSceneObjectInteractionController({ active, ...editing, visibleScene: editing.scene,
+      isInspectorOpen: false, onInspectorOpenChange() {},
       componentVisibility: createDefaultComponentVisibility(), connectivityStatus: "ready",
       closeActiveColorPicker() {}, hideAtom() {}, setBondVisible() {}, requestConnectivity: async () => true });
     return { editing, interaction };

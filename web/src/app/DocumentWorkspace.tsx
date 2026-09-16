@@ -12,7 +12,7 @@ import { createComparisonCameraStore } from "../model/comparisonCameraStore";
 import { ColorPickerRegistryProvider } from "./colorPickerRegistry";
 import { DocumentTabStrip } from "./DocumentTabStrip";
 import { createDocumentWorkspace, type DocumentEditorComponent, type DocumentEditorHandle } from "./documentState";
-import { durableWorkspaceManifest, removeDocument, saveDocumentPreferences, saveDocumentSession, saveModelWorkspace, saveWorkspaceManifest, type StoredDocuments, type WorkspaceManifest } from "./documentStorage";
+import { awaitDocumentSaves, durableWorkspaceManifest, removeDocument, saveDocumentPreferences, saveDocumentSession, saveModelWorkspace, saveWorkspaceManifest, type StoredDocuments, type WorkspaceManifest } from "./documentStorage";
 import type { ModelState } from "../model/structureModel";
 import type { SceneSpec } from "../api/scene";
 
@@ -20,10 +20,14 @@ export function DocumentWorkspace({ initial, restoreFailed, editor: Editor }: {
   initial: StoredDocuments; restoreFailed: boolean; editor: DocumentEditorComponent;
 }) {
   const { t } = useTranslation();
-  const [manifest, setManifest] = useState(initial.manifest);
+  const [manifest, setManifest] = useState<WorkspaceManifest>(() => ({ ...initial.manifest,
+    rightSidebarOpen: initial.manifest.rightSidebarOpen ?? Boolean(initial.documents
+      .find(document => document.session.id === initial.manifest.activeId)?.session.model),
+  }));
   const manifestRef = useRef(manifest);
   const documents = useRef(new Map(initial.documents.map(doc => [doc.session.id, doc])));
   const durableIds = useRef(new Set(initial.documents.map(doc => doc.session.id)));
+  const failedSaveIds = useRef(new Set<string>());
   const handles = useRef(new Map<string, DocumentEditorHandle>());
   const [cameraLink] = useState(() => createComparisonCameraStore({ syncRotation: initial.manifest.syncRotation, uniformScale: initial.manifest.uniformScale }));
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
@@ -41,11 +45,66 @@ export function DocumentWorkspace({ initial, restoreFailed, editor: Editor }: {
       const snapshot = handle.snapshot();
       if (snapshot) {
         documents.current.set(id, snapshot);
+        const failed = () => {
+          if (!documents.current.has(id)) return;
+          failedSaveIds.current.add(id);
+          setError(t("workspace.storageError"));
+        };
         try {
-          if (snapshot.session.model) void saveModelWorkspace(snapshot).catch(() => setError(t("workspace.storageError")));
-          else saveDocumentPreferences(snapshot.preferences);
-        } catch { setError(t("workspace.storageError")); }
+          if (snapshot.session.model) void saveModelWorkspace(snapshot).then(() => {
+            if (documents.current.get(id) === snapshot) failedSaveIds.current.delete(id);
+          }, failed);
+          else { saveDocumentPreferences(snapshot.preferences); failedSaveIds.current.delete(id); }
+        } catch { failed(); }
       }
+    }
+  }, [t]);
+  const flushWorkspace = useCallback(async () => {
+    const isOpen = (id: string) => manifestRef.current.documents.some(document => document.id === id);
+    try {
+      if (typeof indexedDB === "undefined") throw new Error("Workspace storage is unavailable.");
+      if (importController.current && !importController.current.signal.aborted) throw new Error("A structure is still loading.");
+      const ids = manifestRef.current.documents.map(document => document.id);
+      // Hidden documents may have a newer queued revision than our cached snapshot.
+      await awaitDocumentSaves(ids);
+      const saves = ids.filter(isOpen).map(async id => {
+        const editor = handles.current.get(id);
+        if (editor?.isBusy()) throw new Error("A document operation is still running.");
+        if (!editor && durableIds.current.has(id) && !failedSaveIds.current.has(id)) return;
+        const snapshot = editor ? editor.snapshot() : documents.current.get(id);
+        if (!snapshot || snapshot.session.id !== id || snapshot.preferences.sessionId !== id) {
+          throw new Error("The current document snapshot is unavailable.");
+        }
+        documents.current.set(id, snapshot);
+        try {
+          if (snapshot.session.model) await saveModelWorkspace(snapshot);
+          else {
+            await saveDocumentSession(snapshot.session);
+            if (isOpen(id)) saveDocumentPreferences(snapshot.preferences);
+          }
+          if (isOpen(id)) {
+            durableIds.current.add(id);
+            if (documents.current.get(id) === snapshot) failedSaveIds.current.delete(id);
+          }
+        } catch (error) {
+          if (isOpen(id)) failedSaveIds.current.add(id);
+          throw error;
+        }
+      });
+      const results = await Promise.allSettled(saves);
+      const failed = results.find(result => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
+      await awaitDocumentSaves(ids);
+      const latest = manifestRef.current;
+      if (latest.documents.some(document => !ids.includes(document.id)
+        || !durableIds.current.has(document.id) || failedSaveIds.current.has(document.id))) {
+        throw new Error("The document workspace changed before it finished saving.");
+      }
+      // The manifest is committed last; closing documents remain excluded.
+      saveWorkspaceManifest(latest);
+    } catch (error) {
+      setError(t("workspace.storageError"));
+      throw error;
     }
   }, [t]);
   const commit = useCallback((next: WorkspaceManifest, requireSave = false) => {
@@ -162,6 +221,7 @@ export function DocumentWorkspace({ initial, restoreFailed, editor: Editor }: {
     if (!commit({ ...current, documents: nextDocuments, activeId, compareIds }, true)) return;
     documents.current.delete(id);
     handles.current.delete(id);
+    failedSaveIds.current.delete(id);
     await removeDocument(id).catch(() => setError(t("workspace.storageError")));
   }
 
@@ -198,6 +258,7 @@ export function DocumentWorkspace({ initial, restoreFailed, editor: Editor }: {
   if (!mountedIds.length) mountedIds.push("empty");
   const comparison = !!manifest.compareIds;
   const leftSidebarOpen = manifest.leftSidebarOpen ?? true;
+  const rightSidebarOpen = manifest.rightSidebarOpen ?? false;
   const comparisonControls = comparison ? <div className="space-y-2 text-sm">
     <label className="flex items-center justify-between gap-4 py-1">
       <span>{t("documents.syncRotation")}</span>
@@ -244,6 +305,10 @@ export function DocumentWorkspace({ initial, restoreFailed, editor: Editor }: {
         <ColorPickerRegistryProvider><Editor initialWorkspace={documents.current.get(id) ?? null}
           leftSidebarOpen={leftSidebarOpen}
           onLeftSidebarOpenChange={open => commit({ ...manifestRef.current, leftSidebarOpen: open })}
+          rightSidebarOpen={rightSidebarOpen}
+          onRightSidebarOpenChange={open => {
+            if (manifestRef.current.rightSidebarOpen !== open) commit({ ...manifestRef.current, rightSidebarOpen: open });
+          }}
           active={id === "empty" || id === manifest.activeId} comparison={comparison} controlsHost={controlsHost}
           comparisonControls={comparisonControls}
           canCompare={manifest.documents.length >= 2} onToggleCompare={() => {
@@ -251,6 +316,7 @@ export function DocumentWorkspace({ initial, restoreFailed, editor: Editor }: {
           }}
           comparisonCameraStore={cameraLink} onActivate={() => id !== "empty" && activate(id)}
           onOpen={() => input.current?.click()} onCreateModel={(model, scene) => createModelCopy(id, model, scene)}
+          onFlushWorkspace={flushWorkspace}
           onClose={() => closeDocument(id)} register={register} /></ColorPickerRegistryProvider>
       </div>)}
       <div ref={setControlsHost} className="document-controls pointer-events-none absolute inset-0 z-20 overflow-clip" />
