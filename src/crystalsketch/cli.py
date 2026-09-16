@@ -116,7 +116,9 @@ def _choose_free_port(host: str) -> int:
 def _is_port_available(host: str, port: int) -> bool:
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            # Winsock REUSEADDR may bind even while another service owns the port.
+            option = getattr(socket, "SO_EXCLUSIVEADDRUSE", socket.SO_REUSEADDR)
+            sock.setsockopt(socket.SOL_SOCKET, option, 1)
             sock.bind((host, port))
     except OSError:
         return False

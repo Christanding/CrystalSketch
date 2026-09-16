@@ -66,7 +66,8 @@ app()
         yield process
     finally:
         if process.poll() is None:
-            stop_process(process)
+            current = single.read_instance(cache)
+            stop_process(process, current.pid if current else None)
             try:
                 process.wait(timeout=10)
             except subprocess.TimeoutExpired:
@@ -74,13 +75,17 @@ app()
         process.communicate(timeout=5)
 
 
-def stop_process(process):
+def stop_process(process, service_pid=None):
     if os.name == "nt":
         # Terminate the test-owned venv redirector and its Python child together.
         subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"],
                        check=True, capture_output=True)
     else:
         process.kill()
+    process.wait(timeout=5)
+    if service_pid is not None:
+        # Waiting for a venv redirector alone does not await its real Python child.
+        wait_until(lambda: not single.process_alive(service_pid), timeout=5)
 
 
 def test_concurrent_cli_launches_reuse_one_authenticated_service_and_recover_after_crash(tmp_path):
@@ -102,7 +107,7 @@ def test_concurrent_cli_launches_reuse_one_authenticated_service_and_recover_aft
             assert not contender.try_acquire()
         finally:
             contender.close()
-        stop_process(owner)
+        stop_process(owner, current.pid)
         owner.wait(timeout=5)
         assert single.read_instance(cache) == current  # Crash left stale metadata.
     with managed_process(cache, root) as replacement:

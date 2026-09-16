@@ -6,6 +6,7 @@ import sys
 
 import pytest
 import typer.main
+from rich.console import Console
 from typer.testing import CliRunner
 
 import crystalsketch.cli as cli
@@ -181,7 +182,7 @@ def test_run_gui_prints_compact_startup_banner(monkeypatch) -> None:
     result = runner.invoke(cli.app, ["--no-open"])
 
     assert result.exit_code == 0
-    assert result.output == (
+    expected = (
         "╭──────────────────────────────────────────╮\n"
         f"│ 💠 CrystalSketch  v{__version__}                 │\n"
         "│                                          │\n"
@@ -189,6 +190,10 @@ def test_run_gui_prints_compact_startup_banner(monkeypatch) -> None:
         "│ ›  press ctrl + c to quit                │\n"
         "╰──────────────────────────────────────────╯\n"
     )
+    # Rich uses square safe-box corners on legacy Windows consoles.
+    if Console().legacy_windows:
+        expected = expected.translate(str.maketrans("╭╮╰╯", "┌┐└┘"))
+    assert result.output == expected
     assert uvicorn_calls == [
         {
             "host": "127.0.0.1",
