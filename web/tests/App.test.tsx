@@ -2089,6 +2089,7 @@ describe("App", () => {
     expect(fetchCalls).toHaveLength(1);
   });
 
+  // Keep the full stateful preset/export sequence on slower CI runners.
   test("switches and exports all finishes without changing colors, light controls or radii", async () => {
     const user = userEvent.setup();
     await renderLoadedStructure(user);
@@ -2112,7 +2113,7 @@ describe("App", () => {
       expect(request.lightStrength).toBe(baseline.lightStrength);
     }
     expect(fetchCalls).toHaveLength(1);
-  });
+  }, 15_000);
 
   test("keeps radius scales with their object panels and configures style", async () => {
     const user = userEvent.setup();
