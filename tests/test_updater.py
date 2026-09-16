@@ -26,29 +26,43 @@ from fastapi.testclient import TestClient
 from crystalsketch.server import update_worker as worker
 from crystalsketch.server import updater
 from crystalsketch.server.app import create_app
+from crystalsketch.server.single_instance import probe_instance, read_instance
 
 TOKEN = "a" * 43
 JOB = "b" * 32
 PROBE = "c" * 64
 
 
-def wheel_files(version: str, *, fail_start: bool = False) -> dict[str, bytes]:
+def wheel_files(
+    version: str, *, fail_start: bool = False, instance_cache: Path | None = None
+) -> dict[str, bytes]:
     info = f"crystalsketch-{version}.dist-info"
     entrypoint = f"""
-import argparse, json, os
+import argparse, json, os, sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from importlib.metadata import version
+from pathlib import Path
 
 def main():
-    if {fail_start!r}:
-        return 1
     parser = argparse.ArgumentParser()
     parser.add_argument('--host')
     parser.add_argument('--port', type=int)
     parser.add_argument('--no-open', action='store_true')
     args = parser.parse_args()
+    lease = None
+    if {instance_cache is not None!r}:
+        from crystalsketch.server.single_instance import claim_or_reuse
+        lease = claim_or_reuse(Path({str(instance_cache)!r}), Path(sys.prefix))
+        lease.publish(host=args.host, port=args.port, version=version('crystalsketch'))
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.path == '/api/instance' and lease and lease.info.accepts(
+                self.headers.get('X-CrystalSketch-Instance-Token', '')
+            ):
+                body = json.dumps({{'application': 'CrystalSketch',
+                    'instanceId': lease.info.instance_id,
+                    'version': version('crystalsketch')}}).encode()
+                self.send_response(200); self.end_headers(); self.wfile.write(body); return
             valid = self.headers.get('X-CrystalSketch-Update-Probe')
             expected = os.environ.get('CRYSTALSKETCH_UPDATE_PROBE')
             if self.path != '/api/updates/ready' or valid != expected:
@@ -58,9 +72,15 @@ def main():
             self.end_headers(); self.wfile.write(body)
         def log_message(self, *args):
             pass
-    HTTPServer((args.host, args.port), Handler).serve_forever()
+    try:
+        if {fail_start!r}:
+            return 1
+        HTTPServer((args.host, args.port), Handler).serve_forever()
+    finally:
+        if lease:
+            lease.close()
 """
-    return {
+    files = {
         "crystalsketch/__init__.py": f"__version__ = {version!r}\n".encode(),
         "crystalsketch/entrypoint.py": entrypoint.encode(),
         "crystalsketch/cli.py": b"# fixture\n",
@@ -74,12 +94,19 @@ def main():
         f"{info}/WHEEL": b"Wheel-Version: 1.0\nRoot-Is-Purelib: true\nTag: py3-none-any\n",
         f"{info}/entry_points.txt": b"[console_scripts]\nCrystal = crystalsketch.entrypoint:main\n",
     }
+    if instance_cache is not None:
+        # Test the real ownership code inside the venv that the real worker restarts.
+        directory = Path(worker.__file__).parent
+        for name in ("single_instance.py", "update_worker.py"):
+            files[f"crystalsketch/server/{name}"] = (directory / name).read_bytes()
+    return files
 
 
 def make_wheel(
-    directory: Path, version: str = "2.0.0", *, edits=None, tamper=False, fail_start=False
+    directory: Path, version: str = "2.0.0", *, edits=None, tamper=False, fail_start=False,
+    instance_cache: Path | None = None,
 ) -> Path:
-    files = wheel_files(version, fail_start=fail_start)
+    files = wheel_files(version, fail_start=fail_start, instance_cache=instance_cache)
     files.update(edits or {})
     record_name = f"crystalsketch-{version}.dist-info/RECORD"
     rows = [
@@ -571,6 +598,8 @@ def test_update_flow_with_temporary_venv_fake_uv_and_real_short_lived_cli(
     tmp_path, monkeypatch, outcome
 ) -> None:
     root, commands = tmp_path / "tools" / "crystalsketch", tmp_path / "commands"
+    job = tmp_path / "updates" / JOB
+    job.mkdir(parents=True)
     root.parent.mkdir()
     commands.mkdir()
     (root.parent / "unrelated-tool").mkdir()
@@ -590,7 +619,7 @@ def test_update_flow_with_temporary_venv_fake_uv_and_real_short_lived_cli(
         ).strip()
     )
     assert site.is_relative_to(tmp_path)
-    for name, data in wheel_files("1.0.0").items():
+    for name, data in wheel_files("1.0.0", instance_cache=job.parent).items():
         path = site / name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(data)
@@ -599,9 +628,7 @@ def test_update_flow_with_temporary_venv_fake_uv_and_real_short_lived_cli(
     (root / "bin" / "Crystal").write_text("original entrypoint")
     entry = commands / "Crystal"
     entry.symlink_to(root / "bin" / "Crystal")
-    job = tmp_path / "updates" / JOB
-    job.mkdir(parents=True)
-    wheel = make_wheel(job, fail_start=outcome == "new-start-fails")
+    wheel = make_wheel(job, fail_start=outcome == "new-start-fails", instance_cache=job.parent)
     fake_uv = tmp_path / "uv"
     implementation = tmp_path / "fake_uv.py"
     implementation.write_text(f"""
@@ -635,7 +662,8 @@ with zipfile.ZipFile(sys.argv[-1]) as archive:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]
     old = subprocess.Popen(
-        [str(tool_python), "-I", "-c", "import time; time.sleep(30)"],
+        [str(tool_python), "-I", "-c", "from crystalsketch.entrypoint import main; main()",
+         "--host", "127.0.0.1", "--port", str(port), "--no-open"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
     )
@@ -658,7 +686,20 @@ with zipfile.ZipFile(sys.argv[-1]) as archive:
     )
     worker.write_json(job / "plan.json", asdict(plan))
     worker.write_json(job / "job.json", {"version": "2.0.0", "oldVersion": "1.0.0"})
-    worker.write_json(job.parent / "update.lock", {"pid": os.getpid(), "jobId": JOB})
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        old_info = read_instance(job.parent)
+        if old_info and probe_instance(old_info):
+            break
+        assert old.poll() is None
+        time.sleep(0.01)
+    else:
+        old.terminate()
+        old.wait(timeout=5)
+        pytest.fail("Old fixture did not acquire its instance lease")
+    worker.write_json(job.parent / "update.lock", {
+        "pid": os.getpid(), "jobId": JOB, "toolRoot": str(root),
+    })
     started = []
     original_restart = worker.restart_service
 
@@ -687,6 +728,10 @@ with zipfile.ZipFile(sys.argv[-1]) as archive:
         assert result == ([0] if outcome == "success" else [1])
         assert status["phase"] == ("complete" if outcome == "success" else "failed")
         assert status["restored"] is (outcome != "success")
+        current = read_instance(job.parent)
+        assert current and current.instance_id != old_info.instance_id
+        assert probe_instance(current) == current
+        assert current.version == ("2.0.0" if outcome == "success" else "1.0.0")
         assert (job / "backup" / "tool" / "sentinel").read_text() == "original environment"
         assert entry.read_text() == (
             "updated entrypoint" if outcome == "success" else "original entrypoint"

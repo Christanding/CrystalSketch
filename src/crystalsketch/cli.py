@@ -6,7 +6,7 @@ import time
 import webbrowser
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as metadata_version
-from typing import Annotated
+from typing import TYPE_CHECKING, Annotated
 
 import typer
 from rich import box
@@ -15,6 +15,9 @@ from rich.panel import Panel
 from rich.text import Text
 
 from crystalsketch import __version__
+
+if TYPE_CHECKING:
+    from crystalsketch.server.single_instance import InstanceLease
 
 HELP_OPTION_NAMES = ["-h", "--help"]
 PACKAGE_NAME = "crystalsketch"
@@ -185,6 +188,8 @@ def _uvicorn_log_options(verbose: bool) -> dict[str, object]:
 
 def _display_url(host: str, port: int) -> str:
     display_host = LOCALHOST_DISPLAY_HOST if host == DEFAULT_HOST else host
+    if ":" in display_host:
+        display_host = f"[{display_host}]"
     return f"http://{display_host}:{port}/"
 
 
@@ -285,12 +290,61 @@ def _run_gui(
     verbose: bool,
     fallback_to_available_port: bool,
 ) -> None:
+    from crystalsketch.server.single_instance import InstanceError, InstanceInfo, claim_or_reuse
+    from crystalsketch.server.update_worker import UpdateError
+    from crystalsketch.server.updater import _runtime_tool_root, application_cache
+
+    root = _runtime_tool_root()
+    lease: InstanceLease | None = None
+    if root is not None:
+        try:
+            instance = claim_or_reuse(application_cache(), root)
+        except (InstanceError, OSError, UpdateError) as exc:
+            message = (
+                "An older CrystalSketch instance is still running. Stop it in its original "
+                "terminal once, then run Crystal again."
+                if str(exc) == "legacy-instance-running" else
+                "CrystalSketch is starting or updating, or its instance state is unavailable. "
+                "Use the existing window or wait and run Crystal again."
+            )
+            Console(stderr=True).print(message)
+            raise typer.Exit(code=1) from exc
+        if isinstance(instance, InstanceInfo):
+            Console().print(Text(f"CrystalSketch v{instance.version} is already running."))
+            Console().print(_startup_server_line(instance.url))
+            probe_host = instance.probe_host
+            if not no_open and probe_host is not None:
+                _open_browser_when_ready(instance.url, probe_host, instance.port)
+            return
+        lease = instance
+
+    try:
+        _run_new_gui(
+            host=host, port=port, no_open=no_open, reload=reload, verbose=verbose,
+            fallback_to_available_port=fallback_to_available_port, lease=lease,
+        )
+    finally:
+        if lease is not None:
+            lease.close()
+
+
+def _run_new_gui(
+    host: str,
+    port: int,
+    no_open: bool,
+    reload: bool,
+    verbose: bool,
+    fallback_to_available_port: bool,
+    lease: InstanceLease | None = None,
+) -> None:
     selected_port = _choose_port(
         host,
         port,
         fallback_to_available_port=fallback_to_available_port,
     )
     url = _display_url(host, selected_port)
+    info = lease.publish(host=host, port=selected_port,
+                         version=_current_version()) if lease is not None else None
 
     _print_startup_banner(url)
     if not no_open:
@@ -310,7 +364,8 @@ def _run_gui(
 
     from crystalsketch.server.app import create_app
 
-    _run_uvicorn(create_app(), host=host, port=selected_port, **log_options)
+    application = create_app(instance_info=info) if info is not None else create_app()
+    _run_uvicorn(application, host=host, port=selected_port, **log_options)
 
 
 @app.command(context_settings={"help_option_names": HELP_OPTION_NAMES}, hidden=True)

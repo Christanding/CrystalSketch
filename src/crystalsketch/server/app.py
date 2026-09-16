@@ -4,17 +4,20 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from importlib import resources
 from pathlib import Path
+from typing import Annotated
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.gzip import GZipMiddleware
 
 from crystalsketch import __version__
 from crystalsketch.server.prewarm import start_structure_preview_prewarm
 from crystalsketch.server.routes import router
+from crystalsketch.server.single_instance import IDENTITY_HEADER, InstanceInfo, parent_instance
+from crystalsketch.server.update_routes import local_request
 from crystalsketch.server.update_routes import router as update_router
-from crystalsketch.server.updater import UpdateManager
+from crystalsketch.server.updater import UpdateManager, _runtime_tool_root, application_cache
 
 RESPONSE_GZIP_MINIMUM_SIZE = 4 * 1024
 RESPONSE_GZIP_COMPRESSLEVEL = 6
@@ -24,10 +27,15 @@ def create_app(
     static_root: Path | None = None,
     dev_static_fallback: bool = True,
     prewarm_structure_stack: bool = True,
+    instance_info: InstanceInfo | None = None,
 ) -> FastAPI:
     app = FastAPI(title="CrystalSketch", version=__version__, lifespan=_lifespan)
     app.state.update_manager = UpdateManager()
     app.state.prewarm_structure_stack = prewarm_structure_stack
+    root = _runtime_tool_root()
+    app.state.instance_info = instance_info or (
+        parent_instance(application_cache(), root) if root is not None else None
+    )
     app.add_middleware(
         GZipMiddleware,
         minimum_size=RESPONSE_GZIP_MINIMUM_SIZE,
@@ -35,6 +43,20 @@ def create_app(
     )
     app.include_router(router, prefix="/api")
     app.include_router(update_router, prefix="/api")
+
+    @app.get("/api/instance", include_in_schema=False)
+    def instance_identity(
+        request: Request, manager: Annotated[UpdateManager, Depends(local_request)]
+    ) -> JSONResponse:
+        info: InstanceInfo | None = app.state.instance_info
+        if (info is None or (request.url.port or 80) != info.port
+                or not info.accepts(request.headers.get(IDENTITY_HEADER, ""))):
+            raise HTTPException(403, detail={"code": "not-local"})
+        return JSONResponse(
+            {"application": "CrystalSketch", "instanceId": info.instance_id,
+             "version": manager.version},
+            headers={"Cache-Control": "no-store"},
+        )
 
     @app.middleware("http")
     async def protect_local_update_ui(request, call_next):

@@ -4,6 +4,7 @@ import socket
 import subprocess
 import sys
 
+import pytest
 import typer.main
 from typer.testing import CliRunner
 
@@ -225,6 +226,49 @@ def test_run_gui_falls_back_from_default_port_when_occupied(monkeypatch) -> None
 def test_display_url_uses_localhost_for_default_host() -> None:
     assert cli._display_url("127.0.0.1", 8765) == "http://localhost:8765/"
     assert cli._display_url("0.0.0.0", 8765) == "http://0.0.0.0:8765/"
+    assert cli._display_url("::1", 8765) == "http://[::1]:8765/"
+
+
+@pytest.mark.parametrize("no_open", [False, True])
+def test_managed_repeat_launch_reuses_current_version_and_port(tmp_path, monkeypatch, no_open):
+    from crystalsketch.server import single_instance as single
+    from crystalsketch.server import updater
+
+    identity = single.InstanceInfo(
+        pid=123, tool_root=str(tmp_path), host="127.0.0.1", port=12345,
+        version="0.2.0", instance_id="a" * 32, secret="b" * 64,
+    )
+    monkeypatch.setattr(updater, "_runtime_tool_root", lambda: tmp_path)
+    monkeypatch.setattr(updater, "application_cache", lambda: tmp_path)
+    monkeypatch.setattr(single, "claim_or_reuse", lambda cache, root: identity)
+    monkeypatch.setattr(cli, "_run_new_gui", lambda **kwargs: pytest.fail("second server"))
+    opened = []
+    monkeypatch.setattr(cli, "_open_browser_when_ready", lambda *args: opened.append(args))
+    result = runner.invoke(cli.app, ["--port", "0", *(["--no-open"] if no_open else [])])
+    assert result.exit_code == 0
+    assert "v0.2.0 is already running" in result.output
+    assert identity.url in result.output
+    assert opened == ([] if no_open else [(identity.url, "127.0.0.1", 12345)])
+
+
+def test_managed_failed_start_releases_lease_and_published_identity(tmp_path, monkeypatch):
+    from crystalsketch.server import single_instance as single
+    from crystalsketch.server import updater
+
+    monkeypatch.setattr(updater, "_runtime_tool_root", lambda: tmp_path)
+    monkeypatch.setattr(updater, "application_cache", lambda: tmp_path)
+
+    def fail_start(application, **kwargs):
+        assert application.state.instance_info == single.read_instance(tmp_path)
+        assert application.state.instance_info.port == kwargs["port"]
+        raise RuntimeError("cannot bind")
+
+    monkeypatch.setattr(cli, "_load_uvicorn_run", lambda: fail_start)
+    result = runner.invoke(cli.app, ["--no-open", "--port", "0"])
+    assert isinstance(result.exception, RuntimeError)
+    assert not (tmp_path / "instance.json").exists()
+    lease = single.claim_or_reuse(tmp_path, tmp_path, timeout=0)
+    lease.close()
 
 
 def test_startup_banner_does_not_clear_terminal(monkeypatch) -> None:

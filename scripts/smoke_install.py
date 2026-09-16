@@ -53,6 +53,37 @@ def verify(base_url: str) -> None:
                 raise RuntimeError(f"Invalid JavaScript resource: {source}")
 
 
+def stop_process(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            check=True, stdout=subprocess.DEVNULL,
+        )
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=5)
+
+
+def verify_repeat_launch(command: str, work: str, environment: dict[str, str], port: str) -> None:
+    repeat = subprocess.Popen(
+        [command, "--no-open", "--port", "0"], cwd=work, env=environment,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8",
+    )
+    try:
+        output, _ = repeat.communicate(timeout=15)
+        if (repeat.returncode != 0 or "already running" not in output
+                or f"http://localhost:{port}/" not in output):
+            raise RuntimeError(f"Repeat launch did not reuse the installed service: {output}")
+    finally:
+        stop_process(repeat)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-dir", type=Path, required=True)
@@ -105,9 +136,13 @@ def main() -> None:
                         except (URLError, TimeoutError):
                             pass
                         else:
+                            verify_repeat_launch(command, work, environment, match[1])
+                            if process.poll() is not None:
+                                raise RuntimeError("Repeat launch stopped the original service")
+                            verify(base_url)
                             print(
                                 "PASS: global Crystal served HTML, JavaScript "
-                                f"and health at {base_url}"
+                                f"and health at {base_url}; repeat launch reused that service"
                             )
                             return
                     time.sleep(0.2)
@@ -118,19 +153,7 @@ def main() -> None:
                 print(log_path.read_text(encoding="utf-8", errors="replace"))
                 raise
             finally:
-                if process.poll() is None:
-                    if os.name == "nt":
-                        subprocess.run(
-                            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-                            check=True, stdout=subprocess.DEVNULL,
-                        )
-                    else:
-                        process.terminate()
-                    try:
-                        process.wait(timeout=10)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
+                stop_process(process)
 
 
 if __name__ == "__main__":

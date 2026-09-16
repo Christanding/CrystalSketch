@@ -147,7 +147,7 @@ describe("local update API", () => {
 });
 
 describe("update checker interaction", () => {
-  test("shows the build version without automatic checks and requires a second explicit install confirmation", async () => {
+  test("shows the build version without automatic checks and installs after one explicit check", async () => {
     const fetchMock = spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(checked()))
       .mockResolvedValueOnce(Response.json(jobStatus("download", "1.0.0")))
@@ -156,17 +156,14 @@ describe("update checker interaction", () => {
     try {
       render(<UpdateChecker />);
       expect(screen.getByText(i18n.t("updates.currentVersion", { version: import.meta.env.VITE_CRYSTALSKETCH_VERSION }))).toBeTruthy();
+      expect(screen.getByText(i18n.t("updates.automaticUpdate"))).toBeTruthy();
       expect(fetchMock).not.toHaveBeenCalled();
       expect(screen.queryByRole("link")).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
-      const install = await screen.findByRole("button", { name: i18n.t("updates.install") });
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      fireEvent.click(install);
-      expect(await screen.findByRole("dialog")).toBeTruthy();
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.confirm") }));
       await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
       expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "POST", "GET"]);
+      expect(fetchMock.mock.calls[1]?.[1]?.body).toBe('{"confirm":true}');
+      expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get("X-CrystalSketch-Update-Token")).toBe(TOKEN);
     } finally { fetchMock.mockRestore(); reload.mockRestore(); }
   });
 
@@ -203,80 +200,199 @@ describe("update checker interaction", () => {
     } finally { fetchMock.mockRestore(); }
   });
 
-  test("source installations can check versions but never show the overwrite action", async () => {
-    const fetchMock = spyOn(globalThis, "fetch").mockResolvedValue(Response.json(checked("1.0.0", "2.0.0", false)));
+  test.each([
+    { name: "source installation", result: checked("1.0.0", "2.0.0", false), message: i18n.t("updates.unsupported") },
+    { name: "up-to-date installation", result: checked("1.0.0", "1.0.0"), message: i18n.t("updates.latest", { version: "1.0.0" }) },
+    { name: "active update job", result: { ...checked(), activeJob: JOB }, message: i18n.t("updates.busy") },
+  ])("$name does not save or start another installation", async ({ result, message }) => {
+    const fetchMock = spyOn(globalThis, "fetch").mockResolvedValue(Response.json(result));
     const save = mock(async () => {});
     try {
       render(<UpdateChecker currentVersion="1.0.0" onBeforeApply={save} />);
       fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
-      await screen.findByText(i18n.t("updates.unsupported"));
-      expect(screen.queryByRole("button", { name: i18n.t("updates.install") })).toBeNull();
+      await screen.findByText(message);
+      expect(screen.queryByRole("dialog")).toBeNull();
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(save).not.toHaveBeenCalled();
     } finally { fetchMock.mockRestore(); }
   });
 
+  test("the hosted web version never makes an installation request", async () => {
+    const hostname = Object.getOwnPropertyDescriptor(window.location, "hostname");
+    const fetchMock = spyOn(globalThis, "fetch");
+    const save = mock(async () => {});
+    try {
+      Object.defineProperty(window.location, "hostname", { configurable: true, value: "christanding.github.io" });
+      render(<UpdateChecker currentVersion="1.0.0" onBeforeApply={save} />);
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
+      await screen.findByText(i18n.t("updates.webOnly"));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(save).not.toHaveBeenCalled();
+    } finally {
+      fetchMock.mockRestore();
+      if (hostname) Object.defineProperty(window.location, "hostname", hostname);
+      else Reflect.deleteProperty(window.location, "hostname");
+    }
+  });
+
   test("awaits successful saving under an unclosable, keyboard-isolated modal before any apply request", async () => {
     let finishSave: (() => void) | undefined;
-    const save = mock(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    let acceptUpdate: ((response: Response) => void) | undefined;
+    const saveContext: { dialog: HTMLElement | null; guardReady: boolean } = { dialog: null, guardReady: false };
+    const save = mock(() => {
+      saveContext.dialog = screen.queryByRole("dialog");
+      const event = new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true });
+      document.body.dispatchEvent(event);
+      saveContext.guardReady = event.defaultPrevented;
+      return new Promise<void>(resolve => { finishSave = resolve; });
+    });
     const keyboard = mock(() => {});
     window.addEventListener("keydown", keyboard);
     const fetchMock = spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(checked()))
-      .mockResolvedValueOnce(Response.json(jobStatus("download", "1.0.0")))
+      .mockImplementationOnce(fetchHandler(() => new Promise(resolve => { acceptUpdate = resolve; })))
       .mockResolvedValueOnce(Response.json(jobStatus()));
     const reload = spyOn(window.location, "reload").mockImplementation(() => {});
     try {
       render(<UpdateChecker currentVersion="1.0.0" onBeforeApply={save} />);
-      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
-      fireEvent.click(await screen.findByRole("button", { name: i18n.t("updates.install") }));
-      expect(save).not.toHaveBeenCalled();
-      const confirm = screen.getByRole("button", { name: i18n.t("updates.confirm") });
-      fireEvent.click(confirm);
+      const check = screen.getByRole("button", { name: i18n.t("updates.check") });
+      fireEvent.click(check);
       await screen.findByText(i18n.t("updates.saving"));
       expect(save).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect((screen.getByRole("button", { name: i18n.t("updates.cancel") }) as HTMLButtonElement).disabled).toBe(true);
-      fireEvent.keyDown(confirm, { key: "Delete" });
-      fireEvent.keyDown(confirm, { key: "Escape" });
+      expect((check as HTMLButtonElement).disabled).toBe(true);
+      expect(screen.queryAllByRole("button")).toHaveLength(0);
+      const dialog = screen.getByRole("dialog");
+      expect(saveContext.dialog).toBe(dialog);
+      expect(saveContext.guardReady).toBe(true);
+      fireEvent.keyDown(dialog, { key: "Delete" });
+      fireEvent.keyDown(dialog, { key: "Escape" });
+      fireEvent.pointerDown(document.body);
+      fireEvent.keyDown(document.body, { key: "Delete" });
+      fireEvent.keyDown(document.body, { key: "Backspace" });
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(document.activeElement).toBe(dialog);
+      fireEvent.click(check);
       expect(keyboard).not.toHaveBeenCalled();
       expect(screen.getByRole("dialog")).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
       await act(async () => { finishSave?.(); });
+      await screen.findByText(i18n.t("updates.starting"));
+      fireEvent.click(check);
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(save).toHaveBeenCalledTimes(1);
+      await act(async () => { acceptUpdate?.(Response.json(jobStatus("download", "1.0.0"))); });
       await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
       expect(fetchMock).toHaveBeenCalledTimes(3);
     } finally { window.removeEventListener("keydown", keyboard); fetchMock.mockRestore(); reload.mockRestore(); }
   });
 
-  test("a failed save leaves the installation untouched and displays the save error", async () => {
+  test("unmounting during saving never starts an installation after the save resolves", async () => {
+    let finishSave: (() => void) | undefined;
+    const save = mock(() => new Promise<void>(resolve => { finishSave = resolve; }));
+    const keyboard = mock(() => {});
+    window.addEventListener("keydown", keyboard);
     const fetchMock = spyOn(globalThis, "fetch").mockResolvedValue(Response.json(checked()));
-    const save = mock(async () => { throw new Error("storage unavailable"); });
+    const reload = spyOn(window.location, "reload").mockImplementation(() => {});
+    try {
+      const view = render(<UpdateChecker currentVersion="1.0.0" onBeforeApply={save} />);
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
+      await screen.findByText(i18n.t("updates.saving"));
+      view.unmount();
+      fireEvent.keyDown(document.body, { key: "Delete" });
+      expect(keyboard).toHaveBeenCalledTimes(1);
+      await act(async () => { finishSave?.(); });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(reload).not.toHaveBeenCalled();
+    } finally { window.removeEventListener("keydown", keyboard); fetchMock.mockRestore(); reload.mockRestore(); }
+  });
+
+  test("a failed save leaves the installation untouched and a single new check can retry", async () => {
+    const fetchMock = spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(checked()))
+      .mockResolvedValueOnce(Response.json(checked()))
+      .mockResolvedValueOnce(Response.json(jobStatus("download", "1.0.0")))
+      .mockResolvedValueOnce(Response.json(jobStatus()));
+    const save = mock(async () => {}).mockRejectedValueOnce(new Error("storage unavailable"));
+    const keyboard = mock(() => {});
+    window.addEventListener("keydown", keyboard);
+    const reload = spyOn(window.location, "reload").mockImplementation(() => {});
     try {
       render(<UpdateChecker currentVersion="1.0.0" onBeforeApply={save} />);
       fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
-      fireEvent.click(await screen.findByRole("button", { name: i18n.t("updates.install") }));
-      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.confirm") }));
       await screen.findByText(i18n.t("updates.saveFailed"));
+      fireEvent.keyDown(document.body, { key: "Delete" });
+      expect(keyboard).toHaveBeenCalledTimes(1);
       expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect((screen.getByRole("button", { name: i18n.t("updates.cancel") }) as HTMLButtonElement).disabled).toBe(false);
-    } finally { fetchMock.mockRestore(); }
+      expect(screen.queryByRole("link")).toBeNull();
+      expect((screen.getByRole("button", { name: i18n.t("updates.close") }) as HTMLButtonElement).disabled).toBe(false);
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+      expect(save).toHaveBeenCalledTimes(2);
+      expect(fetchMock.mock.calls.map(([, init]) => init?.method ?? "GET")).toEqual(["GET", "GET", "POST", "GET"]);
+    } finally { window.removeEventListener("keydown", keyboard); fetchMock.mockRestore(); reload.mockRestore(); }
   });
 
-  test("reports a restored failed update without reloading or automatically retrying", async () => {
+  test.each([
+    { phase: "failed", restored: true, message: i18n.t("updates.updateFailed") },
+    { phase: "failed", restored: false, message: i18n.t("updates.prepareFailed") },
+    { phase: "recovery-failed", restored: false, message: i18n.t("updates.recoveryFailed") },
+  ])("reports $phase (restored=$restored) with logs, without reloading or automatically retrying", async ({ phase, restored, message }) => {
     const fetchMock = spyOn(globalThis, "fetch")
       .mockResolvedValueOnce(Response.json(checked()))
       .mockResolvedValueOnce(Response.json(jobStatus("download", "1.0.0")))
-      .mockResolvedValueOnce(Response.json({ ...jobStatus("failed", "1.0.0"), restored: true, code: "install-failed" }));
+      .mockResolvedValueOnce(Response.json({ ...jobStatus(phase, "1.0.0"), restored, code: "install-failed" }));
     const reload = spyOn(window.location, "reload").mockImplementation(() => {});
     try {
       render(<UpdateChecker currentVersion="1.0.0" />);
       fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
-      fireEvent.click(await screen.findByRole("button", { name: i18n.t("updates.install") }));
-      fireEvent.click(await screen.findByRole("button", { name: i18n.t("updates.confirm") }));
-      await screen.findByText(i18n.t("updates.updateFailed"));
+      await screen.findByText(message);
       expect(reload).not.toHaveBeenCalled();
       expect(fetchMock).toHaveBeenCalledTimes(3);
       expect(screen.getByRole("link", { name: i18n.t("updates.viewLog") }).getAttribute("href"))
         .toBe(`${window.location.origin}/api/updates/log/${JOB}`);
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.close") }));
+      expect(screen.queryByRole("dialog")).toBeNull();
+      expect(screen.getByRole("status").textContent).toBe(message);
+      expect(screen.getByRole("link", { name: i18n.t("updates.viewLog") })).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+    } finally { fetchMock.mockRestore(); reload.mockRestore(); }
+  });
+
+  test("an expired intent requires another explicit check and never retries the apply request", async () => {
+    const fetchMock = spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(checked()))
+      .mockResolvedValueOnce(Response.json({ detail: { code: "expired" } }, { status: 403 }));
+    const reload = spyOn(window.location, "reload").mockImplementation(() => {});
+    try {
+      render(<UpdateChecker currentVersion="1.0.0" />);
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
+      await screen.findByText(i18n.t("updates.expired"));
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("link")).toBeNull();
+      expect(reload).not.toHaveBeenCalled();
+    } finally { fetchMock.mockRestore(); reload.mockRestore(); }
+  });
+
+  test("unmounting during update observation aborts the status request and does not reload", async () => {
+    const fetchMock = spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(Response.json(checked()))
+      .mockResolvedValueOnce(Response.json(jobStatus("download", "1.0.0")))
+      .mockImplementationOnce(fetchHandler((_input, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+      })));
+    const reload = spyOn(window.location, "reload").mockImplementation(() => {});
+    try {
+      const view = render(<UpdateChecker currentVersion="1.0.0" />);
+      fireEvent.click(screen.getByRole("button", { name: i18n.t("updates.check") }));
+      await screen.findByText(i18n.t("updates.reconnect"));
+      expect(fetchMock).toHaveBeenCalledTimes(3);
+      view.unmount();
+      expect(fetchMock.mock.calls[2]?.[1]?.signal?.aborted).toBe(true);
+      await act(async () => { await Promise.resolve(); });
+      expect(reload).not.toHaveBeenCalled();
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     } finally { fetchMock.mockRestore(); reload.mockRestore(); }
   });
 });

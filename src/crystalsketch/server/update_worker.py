@@ -520,7 +520,8 @@ def restore_installation(job: Path, plan: UpdatePlan) -> None:
     _copy_entrypoint(backup / "entrypoint", entry)
 
 
-def other_running_instances(cache: Path, root: str, own_pids: list[int]) -> bool:
+def other_running_instances(cache: Path, root: str | None, own_pids: list[int]) -> bool:
+    """A null root also detects legacy managed services before a singleton is claimed."""
     running = cache / "running"
     if not running.exists():
         return False
@@ -528,7 +529,11 @@ def other_running_instances(cache: Path, root: str, own_pids: list[int]) -> bool
         try:
             data = read_json(marker, 4096)
             pid = data.get("pid")
-            if data.get("toolRoot") == root and pid not in own_pids and process_alive(pid):
+            tool_root = data.get("toolRoot")
+            matching_root = tool_root == root if root is not None else (
+                isinstance(tool_root, str) and Path(tool_root).is_absolute()
+            )
+            if matching_root and pid not in own_pids and process_alive(pid):
                 return True
         except (OSError, ValueError, UpdateError):
             continue

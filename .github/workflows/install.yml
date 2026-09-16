@@ -80,6 +80,10 @@ jobs:
       - name: Verify the source installation outside the repository
         run: python scripts/smoke_install.py --work-dir "${{ runner.temp }}"
 
+      - name: Verify Windows single-instance locking and crash recovery
+        if: runner.os == 'Windows'
+        run: uv run --locked pytest tests/test_single_instance.py tests/test_cli.py
+
       - name: Extract the generated release bundle
         shell: python {0}
         run: |
