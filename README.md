@@ -135,50 +135,21 @@ uv tool uninstall crystalsketch
 
 ### Windows 提示无法识别 Crystal
 
-如果已经安装 CrystalSketch，但输入 `Crystal` 时提示“无法识别”或“不是内部或外部命令”，可能是命令目录尚未加入 PATH，或当前终端尚未刷新环境变量。
+新版安装器会自动保存并验证 `Crystal` 的用户 PATH。安装完成后，只需完全退出 Windows Terminal 再重新打开一次；不需要每次手动修复，也不需要管理员权限。
 
-新版安装器已自动处理持久化 PATH。旧版用户可以下载最新压缩包并重新运行安装器，或在解压后的文件夹中仅修复命令路径，不重新安装程序：
+如果旧版安装仍提示“无法识别”或“不是内部或外部命令”，下载最新的 **CrystalSketch.zip** 并完整解压。在解压后的文件夹中运行以下命令，只修复已有安装的命令路径，不重新安装：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -RepairPath
 ```
 
-在 **PowerShell** 中完整复制并执行一次以下持久化修复命令：
-
-```powershell
-& {
-    $ErrorActionPreference = 'Stop'
-    $crystalBin = (uv tool dir --bin).Trim()
-
-    if (-not (Test-Path -LiteralPath (Join-Path $crystalBin 'Crystal.exe'))) {
-        throw '没有找到 Crystal.exe，请先确认 CrystalSketch 已安装。'
-    }
-
-    $userPaths = @(
-        [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
-        Where-Object { $_ }
-    )
-
-    if ($userPaths -notcontains $crystalBin) {
-        $userPaths = @($crystalBin) + $userPaths
-    }
-
-    [Environment]::SetEnvironmentVariable('Path', ($userPaths -join ';'), 'User')
-    $env:Path = "$crystalBin;$env:Path"
-
-    Crystal
-}
-```
-
-这段命令会自动读取本机的命令目录，将其持久保存到当前用户的 PATH，同时刷新当前窗口并启动 CrystalSketch。它会保留已有的用户 PATH 条目，无需管理员权限，也无需手动填写用户名、盘符或安装路径。
-
-修复后，日常直接输入 `Crystal` 即可，不需要每次重新执行修复。如果终端仍沿用旧环境，请完全退出 Windows Terminal 后重新打开，而不只是新建标签页；仍未刷新时，可注销并重新登录 Windows 一次。
-
-此命令用于修复已安装程序的命令路径，不能替代安装。如果 `uv` 也无法识别，或 `uv tool list` 中没有 `crystalsketch`，请先按上面的安装步骤完成安装。
+修复后完全退出终端程序再重开，而不只是新建标签页。如果提示没有找到 `Crystal.exe`，说明尚未完成安装，请按上面的两种安装方式之一安装；`-RepairPath` 不能代替安装。
 
 ### Windows 提示无法识别 uv
 
-先完全关闭终端程序并重新打开，再输入 `uv --version` 检查。如果尚未安装 uv，可在 PowerShell 中选择以下任意一种方式安装，**不需要两种都执行**。
+正常安装 CrystalSketch 时无需先手动安装 uv：两种安装方式都会自动准备它。安装器也能识别通过 `UV_INSTALL_DIR` 或 `UV_UNMANAGED_INSTALL` 指定的目录，无需自行拼接用户名和路径。
+
+如果是在单独运行 `uv`（例如卸载时）提示无法识别，先完全关闭终端程序并重新打开，再输入 `uv --version` 检查。确实尚未安装 uv 时，可在 PowerShell 中选择以下任意一种方式安装，**不需要两种都执行**。
 
 方式一：使用 WinGet：
 
@@ -199,6 +170,14 @@ uv --version
 ```
 
 显示版本号即表示安装成功。
+
+### 覆盖解压新安装包后仍装到旧版
+
+从 v0.2.2 起，Windows 与 macOS/Linux 安装器都会按修改时间选择目录中最新的 wheel，避免解压目录残留旧包时误选。升级时使用新压缩包内的安装脚本和 wheel，不要混用旧脚本；在新文件夹中完整解压也可避免混淆。
+
+### Windows 从源码安装时，准备 Bun 后提示找不到 uv
+
+新版安装器让 Bun 引导过程保留当前进程的 PATH，再添加 Bun 所在目录，避免覆盖原来的 Python、uv 和系统工具路径。若使用旧脚本遇到此问题，更新仓库或重新下载完整安装包后，仍按原来的安装命令执行，无需手工改系统 PATH。
 
 ## 许可证
 

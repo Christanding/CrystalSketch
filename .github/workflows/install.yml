@@ -24,7 +24,9 @@ jobs:
         with:
           python-version: "3.12"
       - uses: astral-sh/setup-uv@v8.2.0
+        if: runner.os != 'Windows'
       - uses: oven-sh/setup-bun@v2
+        if: runner.os != 'Windows'
         with:
           bun-version: "1.3.13"
 
@@ -40,8 +42,30 @@ jobs:
         run: bash scripts/install.sh
       - name: Install from source (Windows)
         if: runner.os == 'Windows'
-        shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1
+        shell: powershell
+        run: |
+          $env:UV_INSTALL_DIR = Join-Path $env:RUNNER_TEMP "Crystal uv a'a tools"
+          $env:UV_UNMANAGED_INSTALL = $null
+          $env:UV_NO_MODIFY_PATH = '1'
+          $env:BUN_INSTALL = Join-Path $env:RUNNER_TEMP "Crystal bun a'a tools"
+          # Exercise both real bootstraps even if the runner image ships these tools.
+          $env:Path = (@($env:Path -split ';' | Where-Object {
+            $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'uv.exe')) -and
+              -not (Test-Path -LiteralPath (Join-Path $_ 'bun.exe'))
+          }) -join ';')
+          $sentinel = Join-Path $env:RUNNER_TEMP 'Crystal session-only path'
+          $env:Path = "$sentinel;$env:Path"
+          $before = @($env:Path -split ';')
+          & .\scripts\install.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Source installation failed.' }
+          $after = @($env:Path -split ';')
+          if (@($before | Where-Object { $_ -and $after -notcontains $_ }).Count -ne 0) {
+            throw 'Tool bootstrap removed existing machine or session PATH entries.'
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $env:UV_INSTALL_DIR 'uv.exe'))) { throw 'Custom uv bootstrap was not exercised.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $env:BUN_INSTALL 'bin\bun.exe'))) { throw 'Bun bootstrap was not exercised.' }
+          @($env:UV_INSTALL_DIR, (Join-Path $env:BUN_INSTALL 'bin')) |
+            Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Expose the installed global command
         if: runner.os != 'Windows'
@@ -73,7 +97,23 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         working-directory: ${{ runner.temp }}/release-install/CrystalSketch
-        run: powershell -ExecutionPolicy Bypass -File .\install.ps1
+        run: |
+          $oldWheel = Join-Path (Get-Location) 'crystalsketch-0.0.0-py3-none-any.whl'
+          Set-Content -LiteralPath $oldWheel -Value 'An older wheel must not be selected.'
+          (Get-Item -LiteralPath $oldWheel).LastWriteTimeUtc = [datetime]'2000-01-01T00:00:00Z'
+          if ((Get-ChildItem -Filter 'crystalsketch-*.whl' -File | Select-Object -First 1).FullName -ne $oldWheel) {
+            throw 'The stale-wheel fixture must expose the previous first-item selection bug.'
+          }
+          $env:UV_INSTALL_DIR = $null
+          $env:UV_UNMANAGED_INSTALL = Join-Path $env:RUNNER_TEMP "Crystal unmanaged uv a'a tools"
+          $env:Path = (@($env:Path -split ';' | Where-Object {
+            $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'uv.exe'))
+          }) -join ';')
+          powershell -ExecutionPolicy Bypass -File .\install.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Release installation failed.' }
+          if (-not (Test-Path -LiteralPath (Join-Path $env:UV_UNMANAGED_INSTALL 'uv.exe'))) {
+            throw 'Unmanaged uv bootstrap was not exercised.'
+          }
 
       - name: Verify the release installation outside the repository
         run: python scripts/smoke_install.py --work-dir "${{ runner.temp }}"

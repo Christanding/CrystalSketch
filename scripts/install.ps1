@@ -53,24 +53,27 @@ exit $LASTEXITCODE
     Write-Host 'Completely exit Windows Terminal (not just this tab), then reopen it and type Crystal.'
 }
 
-$crystalWheels = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'crystalsketch-*.whl' -File)
+$crystalWheels = @(Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'crystalsketch-*.whl' -File | Sort-Object LastWriteTime -Descending)
 $crystalRoot = Split-Path -Parent $PSScriptRoot
 if (-not $RepairPath -and $crystalWheels.Count -eq 0 -and -not (Test-Path (Join-Path $crystalRoot 'pyproject.toml'))) {
     throw 'Extract the complete installer or run this script from the CrystalSketch repository.'
 }
 
-$crystalUvCommand = Get-Command uv -ErrorAction SilentlyContinue
+$crystalUvCommand = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
 if ($crystalUvCommand) {
     $crystalUv = $crystalUvCommand.Source
 } else {
-    $crystalUv = Join-Path $env:USERPROFILE '.local\bin\uv.exe'
-    if (-not (Test-Path -LiteralPath $crystalUv)) {
+    $crystalUvDir = if ($env:UV_INSTALL_DIR) { $env:UV_INSTALL_DIR }
+        elseif ($env:UV_UNMANAGED_INSTALL) { $env:UV_UNMANAGED_INSTALL }
+        else { Join-Path $env:USERPROFILE '.local\bin' }
+    $crystalUv = Join-Path $crystalUvDir 'uv.exe'
+    if (-not (Test-Path -LiteralPath $crystalUv -PathType Leaf)) {
         Write-Host 'Preparing the installer...'
         # Official standalone installer; does not require an existing Python.
         Invoke-RestMethod https://astral.sh/uv/install.ps1 | Invoke-Expression
-        $crystalUvCommand = Get-Command uv -ErrorAction SilentlyContinue
+        $crystalUvCommand = Get-Command uv -CommandType Application -ErrorAction SilentlyContinue
         if ($crystalUvCommand) { $crystalUv = $crystalUvCommand.Source }
-        if (-not (Test-Path -LiteralPath $crystalUv)) {
+        if (-not (Test-Path -LiteralPath $crystalUv -PathType Leaf)) {
             throw 'uv installation failed. Check the installer output above.'
         }
     }
@@ -83,12 +86,14 @@ if ($RepairPath) {
 }
 if ($crystalWheels.Count -eq 0) {
     Write-Host 'Installing CrystalSketch from source...'
-    if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command bun -CommandType Application -ErrorAction SilentlyContinue)) {
         $crystalBunRoot = if ($env:BUN_INSTALL) { $env:BUN_INSTALL } else { Join-Path $env:USERPROFILE '.bun' }
         $crystalBunDir = Join-Path $crystalBunRoot 'bin'
-        if (-not (Test-Path (Join-Path $crystalBunDir 'bun.exe'))) {
-            & ([scriptblock]::Create((Invoke-RestMethod https://bun.com/install.ps1))) -Version '1.3.13'
+        $crystalBun = Join-Path $crystalBunDir 'bun.exe'
+        if (-not (Test-Path -LiteralPath $crystalBun -PathType Leaf)) {
+            & ([scriptblock]::Create((Invoke-RestMethod https://bun.com/install.ps1))) -Version '1.3.13' -NoPathUpdate
         }
+        if (-not (Test-Path -LiteralPath $crystalBun -PathType Leaf)) { throw 'Bun installation failed. Check the installer output above.' }
         $env:PATH = "$crystalBunDir;$env:PATH"
     }
     Push-Location $crystalRoot
