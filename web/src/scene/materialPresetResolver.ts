@@ -5,6 +5,8 @@ import {
   type MaterialPresetMaterial,
   type MaterialPresetOverrideTarget,
 } from "../model/materialPresets";
+import { isPhysicalMaterialPreset } from "../model/materialPresets";
+import { readPhysicalMaterialOverrides } from "../model/renderSettings";
 import type { StyleState } from "../model/appearance";
 
 export const STRUCTURE_MATERIAL_TARGETS = [
@@ -28,13 +30,13 @@ export interface ResolvedStructureMaterialFamily {
 }
 
 export function resolveStructureMaterialFamilyForStyle(
-  style: Pick<StyleState, "materialPreset">,
+  style: Pick<StyleState, "materialPreset" | "physicalMaterial">,
 ): ResolvedStructureMaterialFamily {
   return materialPresetToFamily(materialPresetById(style.materialPreset));
 }
 
 export function resolveStructureMaterialFamiliesForStyle(
-  style: Pick<StyleState, "materialPreset">,
+  style: Pick<StyleState, "materialPreset" | "physicalMaterial">,
 ): ResolvedStructureMaterialFamilies {
   return {
     atom: resolveStructureMaterialFamilyForTarget(style, "atom"),
@@ -44,10 +46,14 @@ export function resolveStructureMaterialFamiliesForStyle(
 }
 
 export function resolveStructureMaterialFamilyForTarget(
-  style: Pick<StyleState, "materialPreset">,
+  style: Pick<StyleState, "materialPreset" | "physicalMaterial">,
   target: StructureMaterialTarget,
 ): ResolvedStructureMaterialFamily {
-  return materialPresetToFamily(materialPresetById(style.materialPreset), target);
+  const family = materialPresetToFamily(materialPresetById(style.materialPreset), target);
+  if (target === "polyhedron" || !isPhysicalMaterialPreset(style.materialPreset) || !style.physicalMaterial) return family;
+  return { ...family, material: { ...family.material, props: {
+    ...family.material.props, ...readPhysicalMaterialOverrides(style.physicalMaterial),
+  } } };
 }
 
 function materialPresetToFamily(

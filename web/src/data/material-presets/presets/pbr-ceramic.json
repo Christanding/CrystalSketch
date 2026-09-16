@@ -1,0 +1,8 @@
+{
+  "id": "pbr-ceramic",
+  "label": "物理陶瓷",
+  "description": "A physically based glazed ceramic for studio lighting and path tracing.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.45, "clearcoat": 0.18, "clearcoatRoughness": 0.3, "transmission": 0, "ior": 1.46 } },
+  "overrides": { "polyhedron": { "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.6, "clearcoat": 0, "transmission": 0 } } } },
+  "lighting": []
+}

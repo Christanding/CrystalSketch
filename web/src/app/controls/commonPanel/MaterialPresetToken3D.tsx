@@ -1,12 +1,12 @@
 import { Canvas, useThree } from "@react-three/fiber";
-import { useEffect, useMemo, useSyncExternalStore } from "react";
-import { NeutralToneMapping, NoToneMapping } from "three";
+import { lazy, Suspense, useEffect, useMemo, useSyncExternalStore } from "react";
+import { AgXToneMapping, NeutralToneMapping, NoToneMapping } from "three";
 
 import { cn } from "@/lib/utils";
 import {
-  MATERIAL_PRESET_OPTIONS,
   materialPresetById,
   isMetalMaterialPreset,
+  isPhysicalMaterialPreset,
   type MaterialPreset,
   type MaterialPresetId,
 } from "../../../model/materialPresets";
@@ -14,6 +14,12 @@ import { MaterialPresetLights } from "../../../scene/MaterialPresetLights";
 import type { ResolvedStructureMaterialFamily } from "../../../scene/materialPresetResolver";
 import { StructureMaterial } from "../../../scene/StructureMaterial";
 import { MetalEnvironment } from "../../../scene/MetalEnvironment";
+import { createDefaultStyle } from "../../../model/appearance";
+import { readRenderSettings } from "../../../model/renderSettings";
+
+const StudioLighting = lazy(() => import("../../../scene/StudioLighting"));
+const TOKEN_STUDIO_SETTINGS = readRenderSettings({ studio: "softbox" });
+const TOKEN_STYLE = createDefaultStyle();
 
 const TOKEN_CAMERA_POSITION = [2.4, 1.9, 3.1] as const;
 const TOKEN_COLOR = "#c8d0dc";
@@ -26,6 +32,8 @@ const TOKEN_FALLBACK_STYLE = {
 
 const tokenImageStore = new Map<MaterialPresetId, string>();
 const tokenImageListeners = new Set<() => void>();
+const requestedTokens = new Set<MaterialPresetId>();
+let tokenRevision = 0;
 
 export function MaterialPresetToken3D({
   className,
@@ -35,6 +43,11 @@ export function MaterialPresetToken3D({
   presetId: MaterialPresetId;
 }) {
   const tokenImage = useMaterialPresetTokenImage(presetId);
+  useEffect(() => {
+    if (requestedTokens.has(presetId) || tokenImageStore.has(presetId)) return;
+    requestedTokens.add(presetId);
+    notifyTokenImages();
+  }, [presetId]);
 
   return (
     <span
@@ -67,12 +80,12 @@ export function MaterialPresetToken3D({
 }
 
 export function MaterialPresetTokenPreloadPool() {
-  const images = useSyncExternalStore(
+  const revision = useSyncExternalStore(
     subscribeToMaterialPresetTokenImages,
-    () => tokenImageStore.size,
+    () => tokenRevision,
     () => 0,
   );
-  const pending = useMemo(() => MATERIAL_PRESET_OPTIONS.find(option => !tokenImageStore.has(option.value)), [images]);
+  const pending = useMemo(() => [...requestedTokens].find(id => !tokenImageStore.has(id)), [revision]);
   return (
     <span
       aria-hidden="true"
@@ -81,8 +94,7 @@ export function MaterialPresetTokenPreloadPool() {
     >
       {pending ? (
         <MaterialPresetTokenRenderer
-          key={pending.value}
-          presetId={pending.value}
+          presetId={pending}
         />
       ) : null}
     </span>
@@ -94,15 +106,12 @@ function MaterialPresetTokenRenderer({
 }: {
   presetId: MaterialPresetId;
 }) {
-  const tokenImage = useMaterialPresetTokenImage(presetId);
   const materialFamily = useMemo(
     () => materialPresetToFamily(materialPresetById(presetId)),
     [presetId],
   );
-
-  if (tokenImage) {
-    return null;
-  }
+  const physical = isPhysicalMaterialPreset(presetId);
+  const tokenStyle = useMemo(() => ({ ...TOKEN_STYLE, materialPreset: presetId }), [presetId]);
 
   return (
     <span
@@ -129,9 +138,14 @@ function MaterialPresetTokenRenderer({
         className="pointer-events-none absolute inset-0 h-full w-full"
         style={{ pointerEvents: "none" }}
       >
-        <MaterialPresetLights presetId={materialFamily.id} lighting={materialFamily.lighting} />
-        <TokenImageCapture presetId={presetId} />
-        <MetalEnvironment presetId={presetId} />
+        {physical ? <Suspense fallback={null}>
+          <StudioLighting settings={TOKEN_STUDIO_SETTINGS} style={tokenStyle} lightStrength={1} span={1} />
+          <TokenImageCapture presetId={presetId} />
+        </Suspense> : <>
+          <MaterialPresetLights presetId={materialFamily.id} lighting={materialFamily.lighting} />
+          <MetalEnvironment presetId={presetId} />
+          <TokenImageCapture presetId={presetId} />
+        </>}
         <mesh>
           <sphereGeometry args={[0.26, 48, 32]} />
           <StructureMaterial
@@ -161,7 +175,8 @@ function TokenImageCapture({
 
     const previousToneMapping = gl.toneMapping;
     try {
-      gl.toneMapping = isMetalMaterialPreset(presetId) ? NeutralToneMapping : NoToneMapping;
+      gl.toneMapping = isPhysicalMaterialPreset(presetId) ? AgXToneMapping
+        : isMetalMaterialPreset(presetId) ? NeutralToneMapping : NoToneMapping;
       gl.render(scene, camera);
       setMaterialPresetTokenImage(presetId, gl.domElement.toDataURL("image/png"));
     } finally { gl.toneMapping = previousToneMapping; }
@@ -191,6 +206,11 @@ function setMaterialPresetTokenImage(presetId: MaterialPresetId, image: string) 
   }
 
   tokenImageStore.set(presetId, image);
+  notifyTokenImages();
+}
+
+function notifyTokenImages() {
+  tokenRevision++;
   for (const listener of tokenImageListeners) {
     listener();
   }

@@ -1,8 +1,9 @@
-import { AlertTriangleIcon, Eye, ImageDown, Link, RotateCcw, Unlink } from "lucide-react";
+import { AlertTriangleIcon, Eye, ImageDown, Link, RotateCcw, Unlink, X } from "lucide-react";
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import type { RenderProgress } from "../../../model/renderSettings";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -102,7 +103,9 @@ export function ExportTabContent({ structureContent, ...props }: FigureExportPro
 interface FigureExportProps {
   error: string | null;
   exportProjectedSize?: ExportProjectedSize;
+  exportProgress?: RenderProgress | null;
   isExporting: boolean;
+  onCancelExport?: () => void;
   onExport: () => void;
   onPreview?: () => void;
   onSettingsChange: (settings: ExportSettingsState) => void;
@@ -112,7 +115,9 @@ interface FigureExportProps {
 function FigureExportContent({
   error,
   exportProjectedSize,
+  exportProgress,
   isExporting,
+  onCancelExport,
   onExport,
   onPreview,
   onSettingsChange,
@@ -390,7 +395,7 @@ function FigureExportContent({
             size="sm"
             aria-label={actionLabel}
             className="continuous-pill h-7 gap-1.5 rounded-full px-2.5 text-xs transition-[background-color,transform] duration-100 ease-out enabled:cursor-pointer active:translate-y-[0.5px] active:bg-primary/80 [&_svg]:size-3.5"
-            disabled={!validation.valid}
+            disabled={!validation.valid || isExporting}
             onClick={onExport}
           >
             <span
@@ -398,25 +403,43 @@ function FigureExportContent({
               data-icon="inline-start"
               className="relative inline-flex size-3.5 shrink-0"
             >
-              <ImageDown
-                className={cn(
-                  "absolute inset-0 transition-[opacity,transform] duration-150 ease-out",
-                  isExporting ? "scale-90 opacity-0" : "scale-100 opacity-100",
-                )}
-              />
-              <span
-                className={cn(
-                  "absolute inset-0 rounded-full border-2 border-primary-foreground/35 border-t-primary-foreground transition-opacity duration-150 ease-out motion-enabled:animate-spin motion-enabled:[animation-duration:450ms]",
-                  isExporting ? "opacity-100" : "opacity-0",
-                )}
-              />
+              {isExporting ? <span className="absolute inset-0 rounded-full border-2 border-primary-foreground/35 border-t-primary-foreground motion-enabled:animate-spin motion-enabled:[animation-duration:450ms]" />
+                : <ImageDown className="absolute inset-0" />}
             </span>
             {t("actions.exportFigure")}
           </Button>
         </div>
       </div>
+      {isExporting ? <ExportRenderProgress exportProgress={exportProgress} onCancelExport={onCancelExport} /> : null}
     </div>
   );
+}
+
+export function ExportRenderProgress({ exportProgress, onCancelExport, label }: {
+  exportProgress?: RenderProgress | null;
+  onCancelExport?: () => void;
+  label?: string;
+}) {
+  const { t } = useTranslation();
+  const samples = Math.max(0, Math.floor(exportProgress?.samples ?? 0));
+  const target = Math.max(0, Math.floor(exportProgress?.targetSamples ?? 0));
+  const phase = exportProgress?.phase;
+  const status = phase === "complete" ? t("rendering.finishingExport")
+    : phase && phase !== "idle" ? t(`rendering.phases.${phase}`) : label ?? t("rendering.exporting");
+  return <div className="space-y-2 text-xs">
+    <p role="status" aria-live="polite" className="text-muted-foreground">{status}</p>
+    {target > 0 ? <>
+      <progress aria-label={t("rendering.sampleProgress")} max={target} value={Math.min(samples, target)}
+        className="block h-1 w-full overflow-hidden rounded-full [&::-webkit-progress-bar]:bg-muted [&::-webkit-progress-value]:bg-foreground [&::-moz-progress-bar]:bg-foreground" />
+      <div className="flex items-center justify-between gap-2 tabular-nums text-muted-foreground">
+        <span>{t("rendering.samples", { current: samples, target })}</span>
+        <span>{t("rendering.elapsed", { seconds: Math.max(0, (exportProgress?.elapsedMs ?? 0) / 1000).toFixed(1) })}</span>
+      </div>
+    </> : null}
+    {onCancelExport ? <Button size="sm" variant="outline" className="h-7 gap-1 text-xs" onClick={onCancelExport}>
+      <X aria-hidden="true" />{t("rendering.cancelExport")}
+    </Button> : null}
+  </div>;
 }
 
 function ExportBackgroundPopover({

@@ -1,0 +1,8 @@
+{
+  "id": "pbr-glass",
+  "label": "物理玻璃",
+  "description": "Transmissive dielectric; refraction is a visual material, not a model edit.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.12, "clearcoat": 0, "transmission": 0.88, "thickness": 0.5, "ior": 1.45 } },
+  "overrides": { "polyhedron": { "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.6, "clearcoat": 0, "transmission": 0, "thickness": 0 } } } },
+  "lighting": []
+}

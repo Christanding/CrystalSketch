@@ -38,6 +38,21 @@ const LOCKED_INTERACTION_FEEDBACK_ANIMATION_MS = 420;
 const RESET_VIEW_FEEDBACK_ANIMATION_MS = 150;
 const ZOOM_SLIDER_BLUR_DELAY_MS = 500;
 
+export function PreviewFpsOverlay({ previewFpsStore, style }: {
+  previewFpsStore: PreviewFpsStore;
+  style?: CSSProperties;
+}) {
+  const fps = useSyncExternalStore(
+    previewFpsStore.subscribeFps,
+    previewFpsStore.getFpsSnapshot,
+    previewFpsStore.getFpsSnapshot,
+  );
+  return <div aria-hidden="true" data-testid="fps-overlay" style={style}
+    className="preview-fps-overlay pointer-events-none absolute bottom-2 right-[var(--preview-fps-right,16px)] z-10 whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground transition-[right,bottom] duration-[260ms] ease-[cubic-bezier(0.16,1,0.3,1)] motion-reduced:transition-none">
+    fps {Math.max(0, Math.round(fps))}
+  </div>;
+}
+
 export function ViewControlRail({
   cameraInteractionStore,
   comparison = false,
@@ -49,8 +64,6 @@ export function ViewControlRail({
   lockedInteractionFeedbackCount,
   onInteractionLockedChange,
   onResetView,
-  previewFpsStore,
-  showFps = false,
 }: {
   cameraInteractionStore: CameraInteractionStore;
   comparison?: boolean;
@@ -62,19 +75,12 @@ export function ViewControlRail({
   lockedInteractionFeedbackCount: number;
   onInteractionLockedChange: (interactionLocked: boolean) => void;
   onResetView: () => void;
-  previewFpsStore: PreviewFpsStore;
-  showFps?: boolean;
 }) {
   const { t } = useTranslation();
   const viewScale = useSyncExternalStore(
     cameraInteractionStore.subscribeViewScale,
     cameraInteractionStore.getViewScaleSnapshot,
     cameraInteractionStore.getViewScaleSnapshot,
-  );
-  const fps = useSyncExternalStore(
-    previewFpsStore.subscribeFps,
-    previewFpsStore.getFpsSnapshot,
-    previewFpsStore.getFpsSnapshot,
   );
   const [lockFeedbackPhase, setLockFeedbackPhase] = useState<"a" | "b" | null>(null);
   const [resetFeedbackPhase, setResetFeedbackPhase] = useState<"a" | "b" | null>(null);
@@ -190,15 +196,6 @@ export function ViewControlRail({
           className,
         )}
       >
-        {showFps ? (
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute right-1 -top-5 whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground"
-            data-testid="fps-overlay"
-          >
-            fps {Math.max(0, Math.round(fps))}
-          </div>
-        ) : null}
         <div
           className={cn(
             "flex h-11 w-full items-center gap-1.5 rounded-xl border px-2 shadow-lg shadow-foreground/5",

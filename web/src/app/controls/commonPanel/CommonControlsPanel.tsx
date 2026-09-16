@@ -26,6 +26,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import type { RenderProgress } from "../../../model/renderSettings";
 
 import type {
   ComponentOpacityState,
@@ -78,6 +79,7 @@ export function CommonControlsPanel({
   connectivityStatus,
   exportError,
   exportProjectedSize,
+  exportProgress,
   exportSettings,
   hasPolyhedra,
   polyhedronElements,
@@ -92,6 +94,7 @@ export function CommonControlsPanel({
   onCameraRollChange,
   onActiveTabChange,
   onExport,
+  onCancelExport,
   onPreview,
   onExportSettingsChange,
   onStyleChange,
@@ -108,6 +111,7 @@ export function CommonControlsPanel({
   connectivityStatus: "deferred" | "loading" | "ready" | "error";
   exportError: string | null;
   exportProjectedSize?: ExportProjectedSize;
+  exportProgress?: RenderProgress | null;
   exportSettings: ExportSettingsState;
   hasPolyhedra: boolean;
   polyhedronElements: string[];
@@ -122,6 +126,7 @@ export function CommonControlsPanel({
   onComponentOpacityReset: () => void;
   onComponentVisibilityChange: (key: keyof ComponentVisibilityState, value: boolean) => void;
   onExport: () => void;
+  onCancelExport?: () => void;
   onPreview?: () => void;
   onExportSettingsChange: (settings: ExportSettingsState) => void;
   onStyleChange: Dispatch<SetStateAction<StyleState>>;
@@ -395,8 +400,10 @@ export function CommonControlsPanel({
                 structureContent={structureExportContent}
                 error={exportError}
                 exportProjectedSize={exportProjectedSize}
+                exportProgress={exportProgress}
                 isExporting={isExporting}
                 onExport={onExport}
+                onCancelExport={onCancelExport}
                 onPreview={onPreview}
                 onSettingsChange={onExportSettingsChange}
                 settings={exportSettings}

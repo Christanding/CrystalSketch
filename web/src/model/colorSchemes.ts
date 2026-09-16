@@ -12,6 +12,12 @@ import irisApricotColormap from "../data/colormaps/presets/iris-apricot.json";
 import seaSaltCoralColormap from "../data/colormaps/presets/sea-salt-coral.json";
 import amberMauveColormap from "../data/colormaps/presets/amber-mauve.json";
 import summerMeadowColormap from "../data/colormaps/presets/summer-meadow.json";
+import pbrEnamelColormap from "../data/colormaps/presets/pbr-enamel.json";
+import pbrPeacockColormap from "../data/colormaps/presets/pbr-peacock.json";
+import pbrAmethystColormap from "../data/colormaps/presets/pbr-amethyst.json";
+import pbrCarmineColormap from "../data/colormaps/presets/pbr-carmine.json";
+import pbrAlloyColormap from "../data/colormaps/presets/pbr-alloy.json";
+import pbrMintColormap from "../data/colormaps/presets/pbr-mint.json";
 import cartoPastelColormap from "../data/colormaps/presets/carto-pastel.json";
 import nordColormap from "../data/colormaps/presets/nord.json";
 import grandBudapest2Colormap from "../data/colormaps/presets/grand-budapest-2.json";
@@ -73,6 +79,12 @@ const STATIC_COLORMAP_MODULES: Record<string, unknown> = {
   "../data/colormaps/presets/iris-apricot.json": irisApricotColormap,
   "../data/colormaps/presets/sea-salt-coral.json": seaSaltCoralColormap,
   "../data/colormaps/presets/amber-mauve.json": amberMauveColormap,
+  "../data/colormaps/presets/pbr-enamel.json": pbrEnamelColormap,
+  "../data/colormaps/presets/pbr-peacock.json": pbrPeacockColormap,
+  "../data/colormaps/presets/pbr-amethyst.json": pbrAmethystColormap,
+  "../data/colormaps/presets/pbr-carmine.json": pbrCarmineColormap,
+  "../data/colormaps/presets/pbr-alloy.json": pbrAlloyColormap,
+  "../data/colormaps/presets/pbr-mint.json": pbrMintColormap,
   "../data/colormaps/presets/carto-pastel.json": cartoPastelColormap,
   "../data/colormaps/presets/nord.json": nordColormap,
   "../data/colormaps/presets/grand-budapest-2.json": grandBudapest2Colormap,

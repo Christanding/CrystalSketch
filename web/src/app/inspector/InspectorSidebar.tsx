@@ -1,6 +1,6 @@
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import { useTranslation } from "react-i18next";
-import { Atom, Boxes, PanelRight, Settings } from "lucide-react";
+import { Atom, Boxes, Camera, PanelRight, Settings } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -28,8 +28,9 @@ import {
 } from "./InspectorSettingsPanel";
 import { ObjectsPanel, type ObjectsPanelTab } from "./ObjectsPanel";
 import type { DeletedObjectRecoveryProps } from "./DeletedObjects";
+import { RenderingPanel, type RenderingPanelProps } from "./RenderingPanel";
 
-export type InspectorSidebarTab = "settings" | "objects" | "modeling";
+export type InspectorSidebarTab = "settings" | "objects" | "rendering" | "modeling";
 
 export function InspectorToggle({
   isOpen,
@@ -86,6 +87,10 @@ export function InspectorSidebar({
   isOpen,
   isSceneLoading,
   modelingContent,
+  renderingProgress,
+  renderingPaused,
+  onRenderingPausedChange,
+  onRenderingRestart,
   scene,
   sourceScene,
   deletedSelection,
@@ -144,7 +149,8 @@ export function InspectorSidebar({
   onBondVisibilityChange: (bond: BondSpec, visible: boolean) => void;
   onElementColorChange: (element: string, color: string) => void;
   onStyleChange: Dispatch<SetStateAction<StyleState>>;
-} & DeletedObjectRecoveryProps) {
+} & DeletedObjectRecoveryProps & Pick<RenderingPanelProps,
+  "renderingProgress" | "renderingPaused" | "onRenderingPausedChange" | "onRenderingRestart">) {
   const { t } = useTranslation();
 
   return (
@@ -166,27 +172,30 @@ export function InspectorSidebar({
         }
         className="flex min-h-0 flex-1 flex-col gap-0"
       >
-        <header className="flex h-[60px] shrink-0 items-start px-4 pt-3 pr-16">
+        <header className="flex h-[60px] shrink-0 items-start px-4 pt-3 pr-12">
           <TabsList
             variant="line"
             data-inspector-sidebar-tabs=""
-            className="h-8 w-full justify-start gap-4 rounded-none p-0"
+            className="h-8 w-full justify-start gap-2 rounded-none p-0"
           >
             <TabsTrigger
               value="settings"
-              className="h-8 flex-none px-0 text-[0.875rem] font-semibold"
+              className="h-8 flex-none gap-1 px-0 text-[13px] font-semibold"
             >
               <Settings aria-hidden="true" />
               {t("nav.settings")}
             </TabsTrigger>
             <TabsTrigger
               value="objects"
-              className="h-8 flex-none px-0 text-[0.875rem] font-semibold"
+              className="h-8 flex-none gap-1 px-0 text-[13px] font-semibold"
             >
               <Atom aria-hidden="true" />
               {t("nav.objects")}
             </TabsTrigger>
-            {modelingContent ? <TabsTrigger value="modeling" className="h-8 flex-none px-0 text-[0.875rem] font-semibold">
+            <TabsTrigger value="rendering" className="h-8 flex-none gap-1 px-0 text-[13px] font-semibold">
+              <Camera aria-hidden="true" />{t("rendering.title")}
+            </TabsTrigger>
+            {modelingContent ? <TabsTrigger value="modeling" className="h-8 flex-none gap-1 px-0 text-[13px] font-semibold">
               <Boxes aria-hidden="true" />{t("modeling.title")}
             </TabsTrigger> : null}
           </TabsList>
@@ -202,6 +211,12 @@ export function InspectorSidebar({
               model={settingsModel}
               actions={settingsActions}
             />
+          </TabsContent>
+          <TabsContent value="rendering" className="m-0">
+            <RenderingPanel style={style} onStyleChange={onStyleChange}
+              settingsModel={settingsModel} settingsActions={settingsActions}
+              renderingProgress={renderingProgress} renderingPaused={renderingPaused}
+              onRenderingPausedChange={onRenderingPausedChange} onRenderingRestart={onRenderingRestart} />
           </TabsContent>
           {modelingContent ? <TabsContent value="modeling" className="m-0 flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden">{modelingContent}</TabsContent> : null}
           <TabsContent value="objects" className="-mt-2 min-h-0">

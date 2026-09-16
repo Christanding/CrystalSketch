@@ -1,0 +1,7 @@
+{
+  "id": "pbr-mirror-metal",
+  "label": "镜面金属",
+  "description": "Smooth colored conductor with nonzero roughness for stable specular sampling.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 1, "roughness": 0.055, "clearcoat": 0, "transmission": 0 } },
+  "lighting": []
+}

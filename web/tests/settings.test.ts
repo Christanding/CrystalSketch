@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { AtomSpec, SceneSpec } from "../src/api/scene";
+import { readRenderSettings, STUDIO_PRESET_OPTIONS } from "../src/model/renderSettings";
 import {
   STYLE_FOG_AMOUNT_MAX,
   STYLE_FOG_AMOUNT_MIN,
@@ -47,6 +48,16 @@ import {
 } from "../src/model";
 
 describe("settings", () => {
+  test("round-trips all studio presets without changing the default rendering or export settings", () => {
+    const defaults = readRenderSettings();
+    for (const studio of STUDIO_PRESET_OPTIONS) {
+      expect(readRenderSettings(JSON.parse(JSON.stringify({ ...defaults, studio })))).toEqual({ ...defaults, studio });
+    }
+    expect(readRenderSettings({ studio: "unknown" as never }).studio).toBe("original");
+    expect(readRenderSettings()).toEqual(defaults);
+    expect(createDefaultExportSettings()).toMatchObject({ width: 2000, height: 2000, supersampling: 2 });
+  });
+
   test("keeps the large-scene mesh quality threshold", () => {
     const belowThreshold = LARGE_STRUCTURE_ATOM_COUNT - 1;
     const atThreshold = LARGE_STRUCTURE_ATOM_COUNT;

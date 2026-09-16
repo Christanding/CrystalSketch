@@ -39,6 +39,42 @@
       "tokenElements": ["Si", "O", "N", "Cl"]
     },
     {
+      "id": "pbr-enamel",
+      "label": "Enamel Blue & Orange",
+      "file": "pbr-enamel.json",
+      "tokenElements": ["Cu", "I", "Zn", "N"]
+    },
+    {
+      "id": "pbr-peacock",
+      "label": "Peacock & Terracotta",
+      "file": "pbr-peacock.json",
+      "tokenElements": ["Cu", "I", "Zn", "N"]
+    },
+    {
+      "id": "pbr-amethyst",
+      "label": "Amethyst & Champagne",
+      "file": "pbr-amethyst.json",
+      "tokenElements": ["Cu", "I", "Zn", "N"]
+    },
+    {
+      "id": "pbr-carmine",
+      "label": "Carmine & Celadon",
+      "file": "pbr-carmine.json",
+      "tokenElements": ["Cu", "I", "Zn", "N"]
+    },
+    {
+      "id": "pbr-alloy",
+      "label": "Warm & Cool Alloy",
+      "file": "pbr-alloy.json",
+      "tokenElements": ["Cu", "I", "Zn", "N"]
+    },
+    {
+      "id": "pbr-mint",
+      "label": "Mint & Amethyst",
+      "file": "pbr-mint.json",
+      "tokenElements": ["Cu", "I", "Zn", "N"]
+    },
+    {
       "id": "carto-pastel",
       "label": "CARTO Pastel",
       "file": "carto-pastel.json",

@@ -19,7 +19,7 @@ import {
 } from "three";
 
 import type { ResolvedStructureMaterialFamily } from "./materialPresetResolver";
-import { isMetalMaterialPreset } from "../model/materialPresets";
+import { isMetalMaterialPreset, isPhysicalMaterialPreset } from "../model/materialPresets";
 
 export type StructureMeshMaterial =
   | MeshToonMaterial
@@ -90,7 +90,7 @@ export function StructureMaterial({
     opacity,
     toneMapped: !(isMetalMaterialPreset(materialFamily.id) && materialFamily.material.type === "MeshToonMaterial"),
     userData: { outlineParameters: {
-      visible: outlineVisible ?? (!["satin-matte", "soft-jade", "soft-velvet"].includes(materialFamily.id) && !isMetalMaterialPreset(materialFamily.id)),
+      visible: outlineVisible ?? (!["satin-matte", "soft-jade", "soft-velvet"].includes(materialFamily.id) && !isMetalMaterialPreset(materialFamily.id) && !isPhysicalMaterialPreset(materialFamily.id)),
       thickness: materialFamily.id === "soft-ceramic" ? 0.0008 : 0.0015,
     } },
     onBeforeCompile: compileMaterial,

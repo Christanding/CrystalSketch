@@ -10,16 +10,12 @@ import {
   Info,
   Monitor,
   Moon,
-  MonitorCog,
   MousePointer2,
-  Palette,
   Sun,
   UserRoundCog,
   type LucideIcon,
 } from "lucide-react";
 
-import { NumberStepper } from "@/components/ui/number-stepper";
-import { LightingControls } from "./LightingControls";
 import { Separator } from "@/components/ui/separator";
 import {
   Select,
@@ -56,12 +52,7 @@ import {
   SUPPORTED_LANGUAGES,
   type LanguagePreference,
 } from "../../i18n";
-import { MESH_QUALITY_LABEL_KEYS } from "../../i18n/exportSettingsText";
 import {
-  MESH_QUALITY_OPTIONS,
-  STRUCTURE_LINE_WIDTH_MAX,
-  STRUCTURE_LINE_WIDTH_MIN,
-  STRUCTURE_LINE_WIDTH_STEP,
   type MeshQuality,
   type StructureLineWidthState,
   type UnitCellLineStyle,
@@ -71,31 +62,23 @@ import { useCommittedInput } from "../controls/useCommittedInput";
 import { UpdateChecker } from "./UpdateChecker";
 import {
   clampDragSensitivity,
-  clampLightStrength,
   dragSensitivityToSliderPosition,
   formatDragSensitivityPercent,
-  formatLightStrengthPercent,
   INTERACTION_MODE_OPTIONS,
-  lightStrengthToSliderPosition,
   MAX_DRAG_SENSITIVITY,
-  MAX_LIGHT_STRENGTH,
   MIN_DRAG_SENSITIVITY,
-  MIN_LIGHT_STRENGTH,
   parseDragSensitivityPercentInput,
-  parseLightStrengthPercentInput,
   sliderPositionToDragSensitivity,
-  sliderPositionToLightStrength,
   snapDragSensitivitySliderPosition,
-  snapLightStrengthSliderPosition,
   type InteractionMode,
 } from "../viewState";
 
 const INSPECTOR_BODY_TEXT_CLASS = "text-[13px]";
 const INSPECTOR_SECTION_TITLE_CLASS =
   "text-[13px] font-bold leading-tight text-muted-foreground";
-const INSPECTOR_SELECT_TRIGGER_CLASS =
+export const INSPECTOR_SELECT_TRIGGER_CLASS =
   "!h-6 w-full !px-2 !py-0 bg-background text-[13px]";
-const INSPECTOR_SELECT_ITEM_CLASS = "min-h-6 py-0.5 text-[13px]";
+export const INSPECTOR_SELECT_ITEM_CLASS = "min-h-6 py-0.5 text-[13px]";
 const INSPECTOR_LANGUAGE_LABEL_KEYS: Record<
   LanguagePreference,
   | "language.system"
@@ -190,33 +173,16 @@ export function InspectorSettingsPanel({
   model: InspectorSettingsModel;
 }) {
   const {
-    distinguishSimilarColors,
     dragSensitivity,
-    fogAffectsUnitCell,
-    isCustomColorScheme,
     interactionMode,
-    lightStrength,
     mouseInertia,
-    previewMeshQuality,
     selectionActivation,
-    showCrystalAxisLabels,
-    showFpsOverlay,
-    structureLineWidth,
-    unitCellLineStyle,
   } = model;
   const {
-    onDistinguishSimilarColorsChange,
     onDragSensitivityChange,
-    onFogAffectsUnitCellChange,
     onInteractionModeChange,
-    onLightStrengthChange,
     onMouseInertiaChange,
-    onPreviewMeshQualityChange,
     onSelectionActivationChange,
-    onShowCrystalAxisLabelsChange,
-    onShowFpsOverlayChange,
-    onStructureLineWidthChange,
-    onUnitCellLineStyleChange,
   } = actions;
   const { t } = useTranslation();
   const [languagePreference, setLocalLanguagePreference] = useState(
@@ -349,176 +315,6 @@ export function InspectorSettingsPanel({
       <Separator />
 
       <InspectorSettingsSection
-        id="inspector-appearance-settings"
-        icon={Palette}
-        title={t("settings.appearance")}
-      >
-        <InspectorSwitchRow
-          checked={showCrystalAxisLabels}
-          label={t("settings.showCrystalAxisLabels")}
-          onCheckedChange={onShowCrystalAxisLabelsChange}
-        />
-
-        <InspectorSwitchRow
-          checked={fogAffectsUnitCell}
-          label={t("settings.applyDepthFadingToUnitCell")}
-          onCheckedChange={onFogAffectsUnitCellChange}
-        />
-
-        <InspectorSelectRow label={t("settings.unitCellLineStyle")}>
-          <Select
-            value={unitCellLineStyle}
-            onValueChange={(value) =>
-              onUnitCellLineStyleChange(value as UnitCellLineStyle)
-            }
-          >
-            <SelectTrigger
-              size="sm"
-              aria-label={t("settings.unitCellLineStyle")}
-              className={INSPECTOR_SELECT_TRIGGER_CLASS}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent
-              position="popper"
-              className="!bg-background !text-foreground"
-            >
-              <SelectGroup>
-                <SelectItem
-                  value="solid"
-                  className={INSPECTOR_SELECT_ITEM_CLASS}
-                >
-                  {t("settings.solid")}
-                </SelectItem>
-                <SelectItem
-                  value="dashed"
-                  className={INSPECTOR_SELECT_ITEM_CLASS}
-                >
-                  {t("settings.dashed")}
-                </SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </InspectorSelectRow>
-
-        <InspectorSelectRow label={t("settings.unitCellLineWidth")}>
-          <NumberStepper
-            aria-label={t("settings.unitCellLineWidth")}
-            className="justify-self-end"
-            min={STRUCTURE_LINE_WIDTH_MIN}
-            max={STRUCTURE_LINE_WIDTH_MAX}
-            step={STRUCTURE_LINE_WIDTH_STEP}
-            suffix="px"
-            value={structureLineWidth.unitCell}
-            onValueChange={(unitCell) =>
-              onStructureLineWidthChange((current) => ({
-                ...current,
-                unitCell,
-              }))
-            }
-          />
-        </InspectorSelectRow>
-
-        <InspectorSelectRow label={t("settings.polyhedraEdgeWidth")}>
-          <NumberStepper
-            aria-label={t("settings.polyhedraEdgeWidth")}
-            className="justify-self-end"
-            min={STRUCTURE_LINE_WIDTH_MIN}
-            max={STRUCTURE_LINE_WIDTH_MAX}
-            step={STRUCTURE_LINE_WIDTH_STEP / 2}
-            suffix="px"
-            value={structureLineWidth.polyhedra}
-            onValueChange={(polyhedra) =>
-              onStructureLineWidthChange((current) => ({
-                ...current,
-                polyhedra,
-              }))
-            }
-          />
-        </InspectorSelectRow>
-
-        <InspectorSwitchRow
-          checked={isCustomColorScheme ? false : distinguishSimilarColors}
-          disabled={isCustomColorScheme}
-          label={t("settings.distinguishSimilarColors")}
-          onCheckedChange={onDistinguishSimilarColorsChange}
-        />
-
-        <InspectorRangeRow
-          label={t("settings.lightStrength")}
-          value={lightStrength}
-          min={MIN_LIGHT_STRENGTH}
-          max={MAX_LIGHT_STRENGTH}
-          clampValue={clampLightStrength}
-          formatPercent={formatLightStrengthPercent}
-          onValueChange={onLightStrengthChange}
-          parsePercentInput={parseLightStrengthPercentInput}
-          sliderPositionToValue={sliderPositionToLightStrength}
-          snapSliderPosition={snapLightStrengthSliderPosition}
-          valueToSliderPosition={lightStrengthToSliderPosition}
-        />
-        {actions.onLightDirectionChange && actions.onMainLightIntensityChange && actions.onAmbientLightIntensityChange ? (
-          <LightingControls
-            direction={model.lightDirection}
-            mainIntensity={model.mainLightIntensity}
-            ambientIntensity={model.ambientLightIntensity}
-            onDirectionChange={actions.onLightDirectionChange}
-            onMainIntensityChange={actions.onMainLightIntensityChange}
-            onAmbientIntensityChange={actions.onAmbientLightIntensityChange}
-          />
-        ) : null}
-      </InspectorSettingsSection>
-
-      <Separator />
-
-      <InspectorSettingsSection
-        id="inspector-rendering-settings"
-        icon={MonitorCog}
-        title={t("settings.rendering")}
-      >
-        <InspectorSelectRow label={t("settings.previewQuality")}>
-          <Select
-            value={previewMeshQuality}
-            onValueChange={(value) =>
-              onPreviewMeshQualityChange(value as MeshQuality)
-            }
-          >
-            <SelectTrigger
-              size="sm"
-              aria-label={t("settings.previewQuality")}
-              className={INSPECTOR_SELECT_TRIGGER_CLASS}
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent
-              position="popper"
-              className="!bg-background !text-foreground"
-            >
-              <SelectGroup>
-                {MESH_QUALITY_OPTIONS.map((option) => (
-                  <SelectItem
-                    key={option}
-                    value={option}
-                    className={INSPECTOR_SELECT_ITEM_CLASS}
-                  >
-                    {t(MESH_QUALITY_LABEL_KEYS[option])}
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </InspectorSelectRow>
-
-        <InspectorSwitchRow
-          checked={showFpsOverlay}
-          label={t("settings.showFps")}
-          onCheckedChange={onShowFpsOverlayChange}
-        />
-      </InspectorSettingsSection>
-
-      <Separator />
-
-      <InspectorSettingsSection
         id="inspector-interaction-settings"
         icon={MousePointer2}
         title={t("settings.interaction")}
@@ -616,7 +412,7 @@ export function InspectorSettingsPanel({
   );
 }
 
-function InspectorSettingsSection({
+export function InspectorSettingsSection({
   children,
   icon: Icon,
   id,
@@ -644,7 +440,7 @@ function InspectorSettingsSection({
   );
 }
 
-function InspectorRangeRow({
+export function InspectorRangeRow({
   clampValue,
   formatPercent,
   label,
@@ -762,7 +558,7 @@ function InspectorRangeRow({
   );
 }
 
-function InspectorSwitchRow({
+export function InspectorSwitchRow({
   checked,
   disabled = false,
   label,
@@ -794,7 +590,7 @@ function InspectorSwitchRow({
   );
 }
 
-function InspectorSelectRow({
+export function InspectorSelectRow({
   children,
   label,
 }: {

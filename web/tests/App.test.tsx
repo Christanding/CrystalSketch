@@ -23,12 +23,14 @@ import {
 import { LANGUAGE_STORAGE_KEY, setLanguagePreference } from "../src/i18n";
 import { MOTION_STORAGE_KEY } from "../src/motion/motionPreference";
 import { SELECTION_ACTIVATION_STORAGE_KEY } from "../src/selection/selectionActivationPreference";
-import { MATERIAL_PRESET_OPTIONS } from "../src/model/materialPresets";
+import { MATERIAL_PRESET_OPTIONS, materialPresetById } from "../src/model/materialPresets";
 import { elementColorForScheme } from "../src/model/colorSchemes";
-import { crystalAxisMaterialForStyle, type CrystalAxisMaterialState } from "../src/model/appearance";
+import { baseColorSchemeForStyle, createDefaultStyle, crystalAxisMaterialForStyle, elementColorOverridesForStyle, type CrystalAxisMaterialState } from "../src/model/appearance";
 import { THEME_STORAGE_KEY } from "../src/theme/themePreference";
 import { createAppTestHarness } from "./helpers/appHarness";
 import { useMeasuredPreviewLayout } from "../src/app/layout/overlayLayout";
+import { crystalAxisLabelFontSize as actualCrystalAxisLabelFontSize } from "../src/scene/OrientationGizmo";
+import { createAtomRenderItems } from "../src/scene/AtomRenderItems";
 
 test("remeasures the real compact panel height and ignores the covered left panel when Inspector opens", async () => {
   const previousObserver = globalThis.ResizeObserver;
@@ -197,6 +199,7 @@ mock.module("../src/scene/OrientationGizmo", () => ({
   ORIENTATION_GIZMO_LABEL_DISTANCE: 1.3,
   ORIENTATION_GIZMO_SCALE: 1.36,
   ORIENTATION_GIZMO_ZOOM_PER_CANVAS_PIXEL: 53 / 588,
+  crystalAxisLabelFontSize: actualCrystalAxisLabelFontSize,
   StaticOrientationGizmoScene: () => null,
 }));
 
@@ -204,6 +207,14 @@ let exportRequests: CreateFigureExportOptions[] = [];
 let exportDirectDownloads: { file: FigureExportFile; sourceFileName: string | null }[] = [];
 let exportZipDownloads: { files: FigureExportFile[]; sourceFileName: string | null }[] = [];
 let exportFailure: Error | null = null;
+const PBR_PALETTES = [
+  { id: "pbr-enamel", label: "Enamel Blue & Orange", chineseLabel: "珐琅蓝橙", colors: ["#d58a43", "#336ba7"] },
+  { id: "pbr-peacock", label: "Peacock & Terracotta", chineseLabel: "孔雀赤陶", colors: ["#c56e52", "#268d88"] },
+  { id: "pbr-amethyst", label: "Amethyst & Champagne", chineseLabel: "紫晶香槟", colors: ["#c8ac74", "#7b67ac"] },
+  { id: "pbr-carmine", label: "Carmine & Celadon", chineseLabel: "胭脂青瓷", colors: ["#b95163", "#68a3ae"] },
+  { id: "pbr-alloy", label: "Warm & Cool Alloy", chineseLabel: "合金冷暖", colors: ["#dfc58f", "#b8c8d5"] },
+  { id: "pbr-mint", label: "Mint & Amethyst", chineseLabel: "薄荷紫晶", colors: ["#dccbef", "#b9e4d8"] },
+] as const;
 const DEFAULT_DRAG_SENSITIVITY_PERCENT = formatDragSensitivityPercent(
   DEFAULT_DRAG_SENSITIVITY,
 );
@@ -529,7 +540,10 @@ describe("App", () => {
     expect(materialTokenPreloadPool).not.toBeNull();
     expect(
       materialTokenPreloadPool?.querySelectorAll("[data-slot='material-preset-token-renderer']").length,
-    ).toBe(1);
+    ).toBe(0);
+    await user.click(within(commonControls).getByRole("tab", { name: "Style" }));
+    expect(materialTokenPreloadPool?.querySelectorAll("[data-slot='material-preset-token-renderer']").length).toBe(1);
+    await user.click(within(commonControls).getByRole("tab", { name: "Display" }));
     const displayTab = within(commonControls).getByRole("tab", { name: "Display" });
     expect(displayTab.isConnected).toBe(true);
     expect(within(commonControls).queryByRole("heading", { name: "Display" })).toBeNull();
@@ -627,7 +641,7 @@ describe("App", () => {
     expect(direction.distanceTo(expected)).toBeLessThan(1e-10);
   });
 
-  test("keeps preview quality in the settings sidebar without rendering backend toggles", async () => {
+  test("separates rendering from interaction settings and keeps preview quality editable", async () => {
     const user = userEvent.setup();
 
     await renderLoadedStructure(user);
@@ -642,11 +656,22 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Sidebar" }));
     const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
     expect(within(sidebar).getByRole("heading", { name: "General" })).toBeTruthy();
-    expect(within(sidebar).getByRole("heading", { name: "Appearance" })).toBeTruthy();
-    expect(within(sidebar).getByRole("heading", { name: "Rendering" })).toBeTruthy();
+    expect(within(sidebar).queryByRole("heading", { name: "Appearance" })).toBeNull();
+    expect(within(sidebar).queryByRole("heading", { name: "Rendering" })).toBeNull();
     expect(within(sidebar).getByRole("heading", { name: "Interaction" })).toBeTruthy();
-    expect(within(sidebar).getByRole("heading", { name: "About & updates" })).toBeTruthy();
+    expect(within(sidebar).getAllByRole("heading").map(heading => heading.textContent)).toEqual(["General", "Interaction", "About & updates"]);
     expect(within(sidebar).getByRole("button", { name: "Check for updates" })).toBeTruthy();
+    expect(fetchCalls).toHaveLength(1);
+    expect(within(sidebar).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Settings", "Objects", "Render", "Modeling"]);
+    expect(within(sidebar).queryByRole("slider", { name: "Light strength" })).toBeNull();
+    expect(within(sidebar).queryByRole("combobox", { name: "Preview quality" })).toBeNull();
+    expect(within(sidebar).queryByRole("switch", { name: "Show crystal axis labels" })).toBeNull();
+    expect(within(sidebar).queryByRole("switch", { name: "Distinguish similar colors" })).toBeNull();
+    await user.click(within(sidebar).getByRole("tab", { name: "Render" }));
+    expect(within(sidebar).getByRole("heading", { name: "Image" })).toBeTruthy();
+    expect(within(sidebar).getAllByRole("switch", { name: "Show crystal axis labels" })).toHaveLength(1);
+    expect(within(sidebar).getAllByRole("switch", { name: "Distinguish similar colors" })).toHaveLength(1);
+    expect(within(sidebar).getByRole("radiogroup", { name: "Rendering mode" })).toBeTruthy();
     expect(within(sidebar).queryByRole("heading", { name: "Analysis" })).toBeNull();
     expect(
       within(sidebar).queryByRole("combobox", { name: "Bonding algorithm" }),
@@ -673,6 +698,99 @@ describe("App", () => {
     expect(
       within(sidebar).getByRole("combobox", { name: "Preview quality" }).textContent,
     ).toContain("XHigh");
+  });
+
+  test("keeps legacy shading independent of path tracing and resets physical overrides when choosing another finish", async () => {
+    const user = userEvent.setup();
+    await renderLoadedStructure(user);
+    const commonControls = screen.getByRole("complementary", { name: "Common controls" });
+    await user.click(within(commonControls).getByRole("tab", { name: "Style" }));
+    const materialLabel = within(commonControls).getByRole("combobox", { name: "Material" }).textContent;
+    await user.click(screen.getByRole("button", { name: "Sidebar" }));
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    await user.click(within(sidebar).getByRole("tab", { name: "Render" }));
+    const pathTracing = within(sidebar).getByRole("radio", { name: "Path tracing" }) as HTMLButtonElement;
+    expect(pathTracing.disabled).toBe(true);
+    await user.click(pathTracing);
+    expect(within(commonControls).getByRole("combobox", { name: "Material" }).textContent).toBe(materialLabel);
+    expect(within(commonControls).queryByRole("slider", { name: /^Roughness/ })).toBeNull();
+    const ao = within(sidebar).getByRole("switch", { name: "Contact shading" }) as HTMLButtonElement;
+    expect(ao.disabled).toBe(true);
+    expect(ao.getAttribute("aria-checked")).toBe("false");
+
+    await user.click(within(commonControls).getByRole("combobox", { name: "Material" }));
+    const ceramic = MATERIAL_PRESET_OPTIONS.find(preset => preset.value === "pbr-ceramic")!;
+    await user.click(await screen.findByRole("option", { name: ceramic.label }));
+    expect((within(sidebar).getByRole("radio", { name: "Path tracing" }) as HTMLButtonElement).disabled).toBe(false);
+    await user.click(within(sidebar).getByRole("radio", { name: "Path tracing" }));
+    const roughness = within(commonControls).getByRole("slider", { name: /^Roughness/ });
+    expect(Number(roughness.getAttribute("value"))).toBe(Math.round(Number(materialPresetById("pbr-ceramic").material.props.roughness) * 100));
+    fireEvent.change(roughness, { target: { value: "35" } });
+    expect(Number(roughness.getAttribute("value"))).toBe(35);
+
+    await user.click(within(commonControls).getByRole("combobox", { name: "Material" }));
+    const metal = MATERIAL_PRESET_OPTIONS.find(preset => preset.value === "pbr-metal")!;
+    await user.click(await screen.findByRole("option", { name: metal.label }));
+    expect(Number(within(commonControls).getByRole("slider", { name: /^Roughness/ }).getAttribute("value")))
+      .toBe(Math.round(Number(materialPresetById("pbr-metal").material.props.roughness) * 100));
+    expect(within(sidebar).getByRole("radio", { name: "Path tracing" }).getAttribute("aria-checked")).toBe("true");
+    for (const id of ["pbr-glazed-ceramic", "pbr-glossy-plastic", "pbr-matte-rubber", "pbr-mirror-metal", "pbr-frosted-glass", "pbr-velvet", "pbr-pearl"]) {
+      fireEvent.change(within(commonControls).getByRole("slider", { name: /^Roughness/ }), { target: { value: "35" } });
+      await user.click(within(commonControls).getByRole("combobox", { name: "Material" }));
+      await user.click(await screen.findByRole("option", { name: materialPresetById(id).label }));
+      expect(Number(within(commonControls).getByRole("slider", { name: /^Roughness/ }).getAttribute("value")))
+        .toBe(Math.round(Number(materialPresetById(id).material.props.roughness) * 100));
+      expect((within(sidebar).getByRole("radio", { name: "Path tracing" }) as HTMLButtonElement).disabled).toBe(false);
+      expect(within(sidebar).getByRole("radio", { name: "Path tracing" }).getAttribute("aria-checked")).toBe("true");
+    }
+    await user.click(within(sidebar).getByRole("radio", { name: "Realtime" }));
+    expect((within(sidebar).getByRole("switch", { name: "Contact shading" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(within(sidebar).getByRole("switch", { name: "Contact shading" }).getAttribute("aria-checked")).toBe("false");
+    await user.click(within(sidebar).getByRole("switch", { name: "Contact shading" }));
+    await user.click(within(sidebar).getByRole("radio", { name: "Path tracing" }));
+    await user.click(within(commonControls).getByRole("combobox", { name: "Material" }));
+    const cartoon = MATERIAL_PRESET_OPTIONS.find(preset => preset.value === "cartoon")!;
+    await user.click(await screen.findByRole("option", { name: cartoon.label }));
+    expect(within(commonControls).getByRole("combobox", { name: "Material" }).textContent).toBe(materialLabel);
+    expect(within(commonControls).queryByRole("slider", { name: /^Roughness/ })).toBeNull();
+    expect(within(sidebar).getByRole("radio", { name: "Realtime" }).getAttribute("aria-checked")).toBe("true");
+    expect((within(sidebar).getByRole("radio", { name: "Path tracing" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((within(sidebar).getByRole("switch", { name: "Contact shading" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(within(sidebar).getByRole("switch", { name: "Contact shading" }).getAttribute("aria-checked")).toBe("false");
+  });
+
+  test("selects photographic studio directions and exports them without changing the material, palette or output size", async () => {
+    const user = userEvent.setup();
+    await renderLoadedStructure(user);
+    const common = screen.getByRole("complementary", { name: "Common controls" });
+    await user.click(within(common).getByRole("tab", { name: "Style" }));
+    await user.click(within(common).getByRole("combobox", { name: "Material" }));
+    await user.click(await screen.findByRole("option", { name: MATERIAL_PRESET_OPTIONS.find(p => p.value === "pbr-ceramic")!.label }));
+    await user.click(screen.getByRole("button", { name: "Sidebar" }));
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    await user.click(within(sidebar).getByRole("tab", { name: "Render" }));
+    await user.click(within(common).getByRole("tab", { name: "Export" }));
+    const presets = [
+      ["uniform", "Even soft light", [0, 30]],
+      ["overhead", "Overhead", [0, 90]],
+      ["dual-strip", "Twin strip lights", [-65, 15]],
+      ["rembrandt", "Rembrandt", [-45, 40]],
+    ] as const;
+    for (const [studio, label, direction] of presets) {
+      await user.click(within(sidebar).getByRole("combobox", { name: "Studio" }));
+      await user.click(await screen.findByRole("option", { name: label }));
+      expect(within(sidebar).getByRole("combobox", { name: "Studio" }).textContent).toContain(label);
+      const count = exportRequests.length;
+      await user.click(within(common).getByRole("button", { name: "Export PNG" }));
+      await waitFor(() => expect(exportRequests).toHaveLength(count + 1));
+      const request = exportRequests.at(-1)!;
+      expect(request.style).toMatchObject({
+        materialPreset: "pbr-ceramic", atomRadius: 55, bondThickness: 150,
+        lightDirection: [...direction], rendering: { mode: "realtime", studio },
+      });
+      expect(request.style.customColormap).toEqual(createDefaultStyle().customColormap);
+      expect(request.settings).toMatchObject({ width: 2000, height: 2000, supersampling: 2, meshQuality: "high" });
+    }
   });
 
   test("switches and persists the theme from General", async () => {
@@ -761,6 +879,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Sidebar" }));
     const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    await user.click(within(sidebar).getByRole("tab", { name: "Render" }));
     expect(
       within(sidebar).queryByRole("combobox", {
         name: "Atom rendering mode",
@@ -895,10 +1014,12 @@ describe("App", () => {
     fireEvent.change(within(inspector).getByRole("slider", { name: "Drag sensitivity" }), {
       target: { value: "1000" },
     });
+    await user.click(within(inspector).getByRole("tab", { name: "Render" }));
     const showFpsSwitch = within(inspector).getByRole("switch", { name: "Show FPS" });
     await user.click(showFpsSwitch);
     expect(showFpsSwitch.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByTestId("fps-overlay").textContent).toBe("fps 0");
+    await user.click(within(inspector).getByRole("tab", { name: "Settings" }));
 
     await openPreviewContextMenu();
     await user.click(await screen.findByRole("menuitem", { name: "Reset all" }));
@@ -935,11 +1056,13 @@ describe("App", () => {
     expect(window.localStorage.getItem(SELECTION_ACTIVATION_STORAGE_KEY)).toBe(
       "single",
     );
+    await user.click(within(resetInspector).getByRole("tab", { name: "Render" }));
     expect(
       within(resetInspector).getByRole("switch", { name: "Show FPS" }).getAttribute(
         "aria-checked",
       ),
     ).toBe("false");
+    await user.click(within(resetInspector).getByRole("tab", { name: "Settings" }));
     expect(
       within(resetInspector).getByRole("combobox", { name: "Mouse control" }).textContent,
     ).toContain("Trackball");
@@ -1042,6 +1165,7 @@ describe("App", () => {
       within(inspector).queryByRole("combobox", { name: "Bond rendering mode" }),
     ).toBeNull();
     expect(screen.queryByTestId("fps-overlay")).toBeNull();
+    await user.click(within(inspector).getByRole("tab", { name: "Render" }));
     const showFpsSwitch = within(inspector).getByRole("switch", { name: "Show FPS" });
     expect(showFpsSwitch.getAttribute("aria-checked")).toBe("false");
 
@@ -1050,6 +1174,9 @@ describe("App", () => {
     expect(showFpsSwitch.getAttribute("aria-checked")).toBe("true");
     const fpsOverlay = screen.getByTestId("fps-overlay");
     expect(fpsOverlay.textContent).toBe("fps 0");
+    expect(fpsOverlay.parentElement?.classList.contains("document-controls")).toBe(true);
+    expect(fpsOverlay.closest('aside[aria-label="View controls"]')).toBeNull();
+    await user.click(settingsTab);
 
     expect(legend.getAttribute("style")).toContain("calc(50% + -32px)");
     expect(inspectorButton.getAttribute("aria-expanded")).toBe("true");
@@ -1089,6 +1216,11 @@ describe("App", () => {
       DEFAULT_DRAG_SENSITIVITY_PERCENT,
     );
 
+    fireEvent.change(dragSensitivitySlider, { target: { value: "1000" } });
+    expect(within(inspector).getByRole("slider", { name: "Drag sensitivity" }).getAttribute("value")).toBe("1000");
+    expect(within(inspector).getByRole("textbox", { name: "Drag sensitivity value" }).getAttribute("value")).toBe("200");
+
+    await user.click(within(inspector).getByRole("tab", { name: "Render" }));
     const lightStrengthSlider = within(inspector).getByRole("slider", {
       name: "Light strength",
     });
@@ -1103,20 +1235,7 @@ describe("App", () => {
       name: "Light strength value",
     });
     expect(lightStrengthValueInput.getAttribute("value")).toBe("100");
-    expect(inspector.querySelectorAll(".opacity-slider-snap-marker")).toHaveLength(2);
-
-    fireEvent.change(dragSensitivitySlider, { target: { value: "1000" } });
-
-    expect(
-      within(inspector).getByRole("slider", { name: "Drag sensitivity" }).getAttribute(
-        "value",
-      ),
-    ).toBe("1000");
-    expect(
-      within(inspector).getByRole("textbox", { name: "Drag sensitivity value" }).getAttribute(
-        "value",
-      ),
-    ).toBe("200");
+    expect(inspector.querySelectorAll(".opacity-slider-snap-marker")).toHaveLength(1);
 
     fireEvent.change(lightStrengthSlider, { target: { value: "1000" } });
 
@@ -1131,7 +1250,8 @@ describe("App", () => {
       ),
     ).toBe("200");
 
-    await user.click(interactionSelect);
+    await user.click(settingsTab);
+    await user.click(within(inspector).getByRole("combobox", { name: "Mouse control" }));
     await user.click(await screen.findByRole("option", { name: "Orbit" }));
 
     expect(within(inspector).getByRole("combobox", { name: "Mouse control" }).textContent).toContain(
@@ -1481,6 +1601,7 @@ describe("App", () => {
     const cameraBefore = canvas.getAttribute("data-camera-position");
     await user.click(screen.getByRole("button", { name: "Sidebar" }));
     const inspector = screen.getByRole("complementary", { name: "Sidebar" });
+    await user.click(within(inspector).getByRole("tab", { name: "Render" }));
     const main = within(inspector).getByRole("slider", { name: "Main light" });
     const ambient = within(inspector).getByRole("slider", { name: "Ambient light" });
     expect(main.getAttribute("value")).toBe("0.7");
@@ -1512,6 +1633,7 @@ describe("App", () => {
 
     await user.click(screen.getByRole("button", { name: "Sidebar" }));
     const inspector = screen.getByRole("complementary", { name: "Sidebar" });
+    await user.click(within(inspector).getByRole("tab", { name: "Render" }));
     expect(within(inspector).queryByRole("combobox", { name: "Renderer" })).toBeNull();
     const showCrystalAxisLabelsSwitch = within(inspector).getByRole("switch", {
       name: "Show crystal axis labels",
@@ -1840,13 +1962,79 @@ describe("App", () => {
     expect(exportRequests[0]?.style.bondThickness).toBe(150);
   }, 15_000);
 
-  test("localizes reference palette names while keeping source tooltips and preset identity", async () => {
+  test("exports all PBR palettes with fixed element colors while preserving rendering, geometry and output settings", async () => {
+    const user = userEvent.setup();
+    await renderLoadedStructure(user);
+    const controls = screen.getByRole("complementary", { name: "Common controls" });
+    await user.click(within(controls).getByRole("tab", { name: "Style" }));
+    await user.click(within(controls).getByRole("combobox", { name: "Material" }));
+    await user.click(await screen.findByRole("option", { name: materialPresetById("pbr-pearl").label }));
+    fireEvent.change(within(controls).getByRole("slider", { name: /^Roughness/ }), { target: { value: "35" } });
+    await user.click(screen.getByRole("button", { name: "Sidebar" }));
+    const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+    await user.click(within(sidebar).getByRole("tab", { name: "Render" }));
+    await user.click(within(sidebar).getByRole("radio", { name: "Path tracing" }));
+    await user.click(within(sidebar).getByRole("combobox", { name: "Sampling quality" }));
+    await user.click(await screen.findByRole("option", { name: "High" }));
+    await user.click(within(sidebar).getByRole("combobox", { name: "Studio" }));
+    await user.click(await screen.findByRole("option", { name: "Rembrandt" }));
+    await user.click(within(controls).getByRole("tab", { name: "Export" }));
+    await user.click(within(controls).getByRole("button", { name: "Export PNG" }));
+    await waitFor(() => expect(exportRequests).toHaveLength(1));
+    const baseline = exportRequests[0]!;
+    const originalStyle = structuredClone(baseline.style);
+    const originalScene = structuredClone(baseline.scene);
+    const originalSettings = structuredClone(baseline.settings);
+    const originalOrientation = baseline.cameraOrientationRef.current.toArray();
+    expect(originalStyle).toMatchObject({
+      materialPreset: "pbr-pearl", physicalMaterial: { roughness: 0.35 },
+      rendering: { mode: "path-traced", quality: "high", studio: "rembrandt" },
+      atomRadius: 55, bondThickness: 150,
+    });
+    expect(originalSettings).toMatchObject({ width: 2000, height: 2000, supersampling: 2, meshQuality: "high" });
+
+    for (const { id, label, colors } of PBR_PALETTES) {
+      await user.click(within(controls).getByRole("tab", { name: "Style" }));
+      await user.click(within(controls).getByRole("combobox", { name: "Color scheme" }));
+      const option = await screen.findByRole("option", { name: label });
+      const swatch = option.querySelector<HTMLElement>('[title="Na / Cl"]');
+      expect(swatch?.style.background).toContain(colors[0]);
+      expect(swatch?.style.background).toContain(colors[1]);
+      await user.click(option);
+      expect(within(controls).getByRole("combobox", { name: "Color scheme" }).textContent).toContain(label);
+      expect(within(sidebar).getByRole("radio", { name: "Path tracing" }).getAttribute("aria-checked")).toBe("true");
+      await user.click(within(controls).getByRole("tab", { name: "Export" }));
+      const count = exportRequests.length;
+      await user.click(within(controls).getByRole("button", { name: "Export PNG" }));
+      await waitFor(() => expect(exportRequests).toHaveLength(count + 1));
+      const request = exportRequests.at(-1)!;
+      expect(request.style).toEqual({ ...originalStyle, colorScheme: id, colorSchemeMode: "preset", customColormap: null });
+      expect(request.scene).toEqual(originalScene);
+      expect(request.settings).toEqual(originalSettings);
+      expect(request.componentOpacity).toEqual(baseline.componentOpacity);
+      expect(request.componentVisibility).toEqual(baseline.componentVisibility);
+      expect(request.lightStrength).toBe(baseline.lightStrength);
+      expect(request.cameraOrientationRef.current.toArray()).toEqual(originalOrientation);
+      const atoms = request.visibleSceneOverride?.atoms ?? request.scene.atoms;
+      const items = createAtomRenderItems({
+        atoms, atomOpacity: request.componentOpacity.atoms, style: request.style,
+        colorScheme: baseColorSchemeForStyle(request.style),
+        colorOverrides: elementColorOverridesForStyle(atoms, request.style),
+      });
+      expect(new Set(items.map(item => item.color))).toEqual(new Set(colors));
+      for (const item of items) expect(item.color).toBe(colors[item.atom.element === "Na" ? 0 : 1]);
+    }
+    expect(fetchCalls).toHaveLength(1);
+  }, 15_000);
+
+  test("localizes PBR and reference palette names while keeping source tooltips and preset identity", async () => {
     const user = userEvent.setup();
     await renderLoadedStructure(user);
     await act(() => setLanguagePreference("zh-CN"));
     const controls = screen.getByRole("complementary", { name: "常用控制" });
     await user.click(within(controls).getByRole("tab", { name: "风格" }));
     for (const [label, sourceLabel] of [
+      ...PBR_PALETTES.map(({ chineseLabel, label }) => [chineseLabel, label] as const),
       ["柔彩马卡龙", "CARTO Pastel"], ["北境微光", "Nord"],
       ["布达佩斯", "Grand Budapest 2"], ["托尔亮彩", "Paul Tol Bright"],
       ["晨曦玫瑰", "Rosé Pine Dawn"], ["复古十色", "Tableau 10"],

@@ -1,0 +1,7 @@
+{
+  "id": "pbr-pearl",
+  "label": "珠光涂层",
+  "description": "Thin-film pearlescent coating approximation, not a multilayer nacre microstructure.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.24, "clearcoat": 0.35, "clearcoatRoughness": 0.12, "transmission": 0, "ior": 1.5, "specularColor": "#ffffff", "iridescence": 1, "iridescenceIOR": 2, "iridescenceThicknessRange": [160, 340] } },
+  "lighting": []
+}

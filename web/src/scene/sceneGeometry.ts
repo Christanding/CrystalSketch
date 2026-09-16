@@ -8,6 +8,8 @@ export { atomRadiusForModel } from "../model/elementRadii";
 export const BOND_RADIUS = 0.1;
 export const CELL_FRAME_COLOR = PREVIEW_THEME_COLORS.light.unitCell;
 export const CELL_FRAME_LINE_WIDTH_PIXELS = 1;
+export const CELL_FRAME_DASH_SIZE = 0.08;
+export const CELL_FRAME_GAP_SIZE = 0.03;
 
 export function cellCenter(vectors: VectorTuple[]): Vector3 {
   const [vectorA, vectorB, vectorC] = withDefaultCellVectors(vectors);

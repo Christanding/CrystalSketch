@@ -1,5 +1,5 @@
 {
   "version": 1,
   "defaultPresetId": "cartoon",
-  "presetOrder": ["cartoon", "soft-ceramic", "satin-matte", "cel-shaded", "colored-metal", "soft-jade", "soft-velvet", "modern-matte", "classic-matte", "glossy", "metallic", "2-5d", "2d"]
+  "presetOrder": ["cartoon", "soft-ceramic", "satin-matte", "cel-shaded", "colored-metal", "soft-jade", "soft-velvet", "pbr-ceramic", "pbr-matte", "pbr-metal", "pbr-glass", "pbr-glazed-ceramic", "pbr-glossy-plastic", "pbr-matte-rubber", "pbr-mirror-metal", "pbr-frosted-glass", "pbr-velvet", "pbr-pearl", "modern-matte", "classic-matte", "glossy", "metallic", "2-5d", "2d"]
 }

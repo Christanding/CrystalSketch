@@ -1,0 +1,7 @@
+{
+  "id": "pbr-frosted-glass",
+  "label": "磨砂玻璃",
+  "description": "Rough transmissive dielectric used as an artistic frosted-glass approximation.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.48, "clearcoat": 0, "transmission": 0.86, "thickness": 0.5, "ior": 1.45 } },
+  "lighting": []
+}

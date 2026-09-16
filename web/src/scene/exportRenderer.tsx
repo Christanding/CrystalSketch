@@ -3,8 +3,13 @@ import { withPngDpi } from "../export/pngDpi";
 import { createCartoonRenderer } from "./CartoonOutline";
 import { MetalEnvironment } from "./MetalEnvironment";
 import { useLayoutEffect } from "react";
-import { NeutralToneMapping, NoToneMapping, Quaternion, Vector3 } from "three";
-import { isMetalMaterialPreset } from "../model/materialPresets";
+import { AgXToneMapping, NeutralToneMapping, NoToneMapping, Quaternion, Vector3 } from "three";
+import { isMetalMaterialPreset, isPhysicalMaterialPreset } from "../model/materialPresets";
+import { readRenderSettings } from "../model/renderSettings";
+import type { FigureRenderControl } from "../export/types";
+import { usesStudioLighting } from "./studioEnvironment";
+import { ANNOTATION_LAYER } from "./renderOverlay";
+import { sceneHasTransparency } from "./renderItemPolicy";
 import { DEFAULT_CRYSTAL_AXIS_MATERIAL } from "../model";
 import { CrystalAxisLighting } from "./CrystalAxisMaterial";
 
@@ -37,6 +42,7 @@ import {
   ORIENTATION_GIZMO_LABEL_DISTANCE,
   ORIENTATION_GIZMO_SCALE,
   ORIENTATION_GIZMO_ZOOM_PER_CANVAS_PIXEL,
+  crystalAxisLabelFontSize,
   StaticOrientationGizmoScene,
 } from "./OrientationGizmo";
 import {
@@ -76,6 +82,7 @@ export interface RasterExportTextItem {
 }
 
 export interface RenderStructureRasterOptions {
+  renderControl?: FigureRenderControl;
   backgroundColor: string | null;
   cameraPose: CameraPoseSnapshot;
   componentOpacity: ComponentOpacityState;
@@ -112,6 +119,7 @@ export interface RenderCrystalAxesRasterOptions {
 }
 
 export async function renderStructureRasterImage({
+  renderControl,
   backgroundColor,
   cameraPose,
   componentOpacity,
@@ -129,6 +137,11 @@ export async function renderStructureRasterImage({
   unitCellLineStyle,
   width,
 }: RenderStructureRasterOptions): Promise<RasterExportImage> {
+  renderControl?.signal?.throwIfAborted();
+  const rendering = readRenderSettings(style.rendering);
+  const physical = isPhysicalMaterialPreset(style.materialPreset);
+  const studio = usesStudioLighting(style);
+  const StudioLighting = studio ? (await import("./StudioLighting")).default : null;
   const renderWidth = width * supersampling;
   const renderHeight = height * supersampling;
   const canvas = document.createElement("canvas");
@@ -204,14 +217,14 @@ export async function renderStructureRasterImage({
 
     const store = root.render(
       <>
-        <MaterialPresetLights
+        {StudioLighting ? <StudioLighting settings={rendering} style={style} span={layout.span} lightStrength={lightStrength} /> : <MaterialPresetLights
           presetId={materialFamily.id}
           ambientIntensity={style.ambientLightIntensity}
           mainIntensity={style.mainLightIntensity}
           direction={style.lightDirection}
           intensityScale={lightStrength}
           lighting={materialFamily.lighting}
-        />
+        />}
         <ExportSceneContent
           backgroundColor={backgroundColor}
           cameraPose={cameraPose}
@@ -229,7 +242,7 @@ export async function renderStructureRasterImage({
           unitCellLineStyle={unitCellLineStyle}
           unitCellLineWidthScale={unitCellLineWidthScale}
         />
-        <MetalEnvironment presetId={style.materialPreset} ambientIntensity={style.ambientLightIntensity} intensityScale={lightStrength} />
+        {!studio ? <MetalEnvironment presetId={style.materialPreset} ambientIntensity={style.ambientLightIntensity} intensityScale={lightStrength} /> : null}
         <RenderReady onReady={() => resolveMounted?.()} />
       </>,
     );
@@ -238,14 +251,33 @@ export async function renderStructureRasterImage({
     const state = rootState ?? store.getState();
     state.advance(performance.now(), true);
     state.advance(performance.now() + 16, true);
-
-    const cartoonRenderer = createCartoonRenderer(state.gl, isMetalMaterialPreset(style.materialPreset) ? NeutralToneMapping : NoToneMapping);
-    try { cartoonRenderer.render(state.scene, state.camera); }
-    finally { cartoonRenderer.dispose(); }
-
-
+    renderControl?.signal?.throwIfAborted();
+    state.camera.layers.enable(ANNOTATION_LAYER);
+    state.gl.toneMapping = physical ? AgXToneMapping : isMetalMaterialPreset(style.materialPreset) ? NeutralToneMapping : NoToneMapping;
+    state.gl.toneMappingExposure = physical ? rendering.exposure : 1;
+    let renderedCanvas = canvas;
+    if (!physical) {
+      // Legacy materials keep their original outline and lighting pipeline, including restored documents with PBR settings.
+      const cartoonRenderer = createCartoonRenderer(state.gl, state.gl.toneMapping);
+      try { cartoonRenderer.render(state.scene, state.camera); }
+      finally { cartoonRenderer.dispose(); }
+    } else if (rendering.mode === "path-traced") {
+      const { renderPathTracedExport } = await import("./pathTracingExport");
+      renderedCanvas = await renderPathTracedExport({ source: scene, style, componentOpacity, showAtoms, showUnitCell,
+        unitCellLineStyle,
+        unitCellColor: unitCellLineColor ?? "#444444", background: backgroundColor, width: renderWidth, height: renderHeight,
+        layout, meshDetail, camera: state.camera, unitCellLineWidth: unitCellLineWidthScale, polyhedronLineWidth: polyhedronEdgeLineWidthScale,
+        lightStrength, renderer: state.gl, rasterScene: state.scene, settings: rendering, control: renderControl });
+    } else if (rendering.aoEnabled) {
+      const { createAmbientOcclusion } = await import("./ambientOcclusion");
+      const ao = createAmbientOcclusion(state.gl, state.scene, state.camera);
+      try { ao.render(rendering, Math.max(0.1, layout.span / Math.cbrt(Math.max(1, scene.atoms.length)) * 0.65),
+        sceneHasTransparency(scene, componentOpacity, style, showAtoms, showUnitCell)); }
+      finally { ao.dispose(); }
+    } else state.gl.render(state.scene, state.camera);
+    renderControl?.signal?.throwIfAborted();
     const outputCanvas =
-      supersampling === 1 ? canvas : downsampleCanvas(canvas, width, height);
+      supersampling === 1 ? renderedCanvas : downsampleCanvas(renderedCanvas, width, height);
     const blob = await canvasToRasterBlob(outputCanvas, imageFormat, backgroundColor);
     return {
       blob,
@@ -417,7 +449,6 @@ export async function renderCrystalAxesRasterImage({
       },
       renderSize,
       rootState: state,
-      supersampling,
     });
     const cropped = cropTransparentCanvas(
       canvas,
@@ -589,14 +620,12 @@ function crystalAxisTextItems({
   crop,
   renderSize,
   rootState,
-  supersampling,
 }: {
   axes: OrientationGizmoAxisSpec[];
   cameraPose: CameraPoseSnapshot;
   crop: { sourceX: number; sourceY: number };
   renderSize: number;
   rootState: RootState;
-  supersampling: number;
 }): RasterExportTextItem[] {
   const inverseRotation = new Quaternion(...cameraPose.quaternion).invert();
 
@@ -609,7 +638,7 @@ function crystalAxisTextItems({
       fontStyle: "italic",
       fontWeight: 500,
       label: axis.label,
-      size: 56 * supersampling,
+      size: crystalAxisLabelFontSize(rootState.camera, renderSize),
       x: ((projected.x + 1) / 2) * renderSize - crop.sourceX,
       y: ((1 - projected.y) / 2) * renderSize - crop.sourceY,
     };

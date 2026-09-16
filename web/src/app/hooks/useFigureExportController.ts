@@ -28,6 +28,7 @@ import {
   type UnitCellLineStyle,
 } from "../../model";
 import { prepareFigurePreview, type FigurePreviewState } from "../../export/figurePreview";
+import type { RenderProgress } from "../../model/renderSettings";
 
 interface UseFigureExportControllerOptions {
   blockedReason?: string;
@@ -65,6 +66,8 @@ export function useFigureExportController({
   visibleScene,
 }: UseFigureExportControllerOptions) {
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<RenderProgress | null>(null);
+  const renderRequest = useRef<AbortController | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [exportProjectedSize, setExportProjectedSize] =
     useState<ExportProjectedSize | null>(null);
@@ -72,9 +75,17 @@ export function useFigureExportController({
   const [figurePreview, setFigurePreview] = useState<FigurePreviewState>({ open: false, loading: false, error: null, content: null });
   const previewRequestRef = useRef(0);
   const busyRef = useRef(false);
-  useEffect(() => () => { previewRequestRef.current += 1; }, []);
+  useEffect(() => () => { previewRequestRef.current += 1; renderRequest.current?.abort(); }, []);
+  const cancelExport = useCallback(() => {
+    renderRequest.current?.abort();
+    previewRequestRef.current += 1;
+    setFigurePreview({ open: false, loading: false, error: null, content: null });
+    setExportProgress(null);
+  }, []);
 
   const resetExportState = useCallback(() => {
+    renderRequest.current?.abort();
+    setExportProgress(null);
     previewRequestRef.current += 1;
     setFigurePreview({ open: false, loading: false, error: null, content: null });
     setExportError(null);
@@ -154,12 +165,18 @@ export function useFigureExportController({
     }
 
     busyRef.current = true;
+    const controller = new AbortController();
+    renderRequest.current = controller;
+    setExportProgress(null);
     setIsExporting(true);
     setExportError(null);
 
     try {
       const settingsForExport = prepareExportSettings();
       const exportFiles = await createFigureExportFiles({
+        renderControl: { signal: controller.signal, onProgress: progress => {
+          if (!controller.signal.aborted) setExportProgress(progress);
+        } },
         visibleSceneOverride,
         bondVisibilityOverrides,
         cameraOrientationRef,
@@ -174,14 +191,18 @@ export function useFigureExportController({
         structureLineWidth,
         unitCellLineStyle,
       });
+      controller.signal.throwIfAborted();
       await downloadFigureExportFiles(exportFiles, selectedFileName);
     } catch (error) {
+      if (controller.signal.aborted) return;
       setExportError(
         error instanceof Error
           ? error.message
           : "Could not export this structure figure.",
       );
     } finally {
+      if (renderRequest.current === controller) renderRequest.current = null;
+      setExportProgress(null);
       busyRef.current = false;
       setIsExporting(false);
     }
@@ -207,12 +228,18 @@ export function useFigureExportController({
     if (blockedReason) { setExportError(blockedReason); return; }
     if (!scene || busyRef.current) return;
     busyRef.current = true;
+    const controller = new AbortController();
+    renderRequest.current = controller;
+    setExportProgress(null);
     setIsExporting(true);
     const requestId = ++previewRequestRef.current;
     setExportError(null);
     setFigurePreview({ open: true, loading: true, error: null, content: null });
     try {
       const content = await prepareFigurePreview({
+        renderControl: { signal: controller.signal, onProgress: progress => {
+          if (!controller.signal.aborted) setExportProgress(progress);
+        } },
         visibleSceneOverride,
         bondVisibilityOverrides,
         cameraOrientationRef,
@@ -227,15 +254,17 @@ export function useFigureExportController({
         structureLineWidth,
         unitCellLineStyle,
       });
-      if (previewRequestRef.current === requestId) {
+      if (!controller.signal.aborted && previewRequestRef.current === requestId) {
         setFigurePreview({ open: true, loading: false, error: null, content });
       }
     } catch (error) {
-      if (previewRequestRef.current === requestId) {
+      if (!controller.signal.aborted && previewRequestRef.current === requestId) {
         setFigurePreview({ open: true, loading: false, content: null,
           error: error instanceof Error ? error.message : "Could not prepare this figure preview." });
       }
     } finally {
+      if (renderRequest.current === controller) renderRequest.current = null;
+      setExportProgress(null);
       busyRef.current = false;
       setIsExporting(false);
     }
@@ -245,6 +274,7 @@ export function useFigureExportController({
 
   const handleFigurePreviewOpenChange = useCallback((open: boolean) => {
     if (!open) {
+      renderRequest.current?.abort();
       previewRequestRef.current += 1;
       setFigurePreview({ open: false, loading: false, error: null, content: null });
     }
@@ -256,6 +286,8 @@ export function useFigureExportController({
   }, []);
 
   return {
+    exportProgress,
+    cancelExport,
     exportError,
     exportProjectedSize: visibleExportProjectedSize,
     exportSettings,

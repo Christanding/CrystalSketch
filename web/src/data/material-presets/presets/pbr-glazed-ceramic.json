@@ -1,0 +1,7 @@
+{
+  "id": "pbr-glazed-ceramic",
+  "label": "高釉陶瓷",
+  "description": "Glossy clear coating over a rough dielectric base, preserving the element base color.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.24, "clearcoat": 1, "clearcoatRoughness": 0.06, "transmission": 0, "ior": 1.5, "specularColor": "#ffffff" } },
+  "lighting": []
+}

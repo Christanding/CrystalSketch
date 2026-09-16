@@ -1,4 +1,5 @@
 import type { AtomSpec } from "../api/scene";
+import type { PhysicalMaterialOverrides, RenderSettings } from "./renderSettings";
 import { cartoonElement } from "./cartoonElements";
 import {
   autoDistinctElementColorOverrides,
@@ -11,6 +12,7 @@ import {
 } from "./colorSchemes";
 import {
   DEFAULT_MATERIAL_PRESET_ID,
+  isPhysicalMaterialPreset,
   type MaterialPresetId,
 } from "./materialPresets";
 import {
@@ -32,6 +34,8 @@ export interface CustomColormap {
 }
 
 export interface StyleState {
+  rendering?: RenderSettings;
+  physicalMaterial?: PhysicalMaterialOverrides;
   polyhedronColors?: Record<string, string>;
   lightDirection?: [azimuth: number, elevation: number];
   mainLightIntensity?: number;
@@ -61,7 +65,8 @@ export function crystalAxisMaterialForStyle(style: Pick<StyleState,
   "materialPreset" | "ambientLightIntensity" | "mainLightIntensity" | "lightDirection"
 >, lightStrength = 1): CrystalAxisMaterialState {
   return {
-    materialPreset: style.materialPreset,
+    // The small axis legend is an annotation, not part of the studio-lit model.
+    materialPreset: isPhysicalMaterialPreset(style.materialPreset) ? "satin-matte" : style.materialPreset,
     ambientLightIntensity: style.ambientLightIntensity,
     mainLightIntensity: style.mainLightIntensity,
     lightDirection: style.lightDirection,

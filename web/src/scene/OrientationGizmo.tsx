@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   CanvasTexture,
+  type Camera,
   Color,
   Group,
   LinearFilter,
@@ -58,6 +59,12 @@ const SHAFT_LENGTH = 0.82;
 const SHAFT_RADIUS = 0.055;
 export const ORIENTATION_GIZMO_ZOOM_PER_CANVAS_PIXEL = BASE_CAMERA_ZOOM / BASE_INNER_CANVAS_SIZE;
 const Y_AXIS = new Vector3(0, 1, 0);
+
+/** Match the em size painted into the preview sprite, in the current output pixels. */
+export function crystalAxisLabelFontSize(camera: Pick<Camera, "projectionMatrix">, canvasHeight: number): number {
+  const worldEm = LABEL_SCALE * ORIENTATION_GIZMO_SCALE * LABEL_FONT_SIZE / LABEL_TEXTURE_SIZE;
+  return worldEm * Math.abs(camera.projectionMatrix.elements[5]!) * canvasHeight / 2;
+}
 
 export function OrientationGizmo({
   axisColors,

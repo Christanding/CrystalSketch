@@ -23,6 +23,14 @@ const ILLUSTRATION_SCHEMES = [
   { label: "Sea Salt Coral", value: "sea-salt-coral" },
   { label: "Amber Mauve", value: "amber-mauve" },
 ];
+const PBR_SCHEMES = [
+  { label: "Enamel Blue & Orange", value: "pbr-enamel", pair: ["#d58a43", "#336ba7"] },
+  { label: "Peacock & Terracotta", value: "pbr-peacock", pair: ["#c56e52", "#268d88"] },
+  { label: "Amethyst & Champagne", value: "pbr-amethyst", pair: ["#c8ac74", "#7b67ac"] },
+  { label: "Carmine & Celadon", value: "pbr-carmine", pair: ["#b95163", "#68a3ae"] },
+  { label: "Warm & Cool Alloy", value: "pbr-alloy", pair: ["#dfc58f", "#b8c8d5"] },
+  { label: "Mint & Amethyst", value: "pbr-mint", pair: ["#dccbef", "#b9e4d8"] },
+] as const;
 const REFERENCE_SCHEMES = [
   { label: "CARTO Pastel", value: "carto-pastel" },
   { label: "Nord", value: "nord" },
@@ -75,6 +83,7 @@ describe("color schemes", () => {
     expect(DEFAULT_COLOR_SCHEME_ID).toBe("vesta-soft");
     expect(COLOR_SCHEMES.map((colormap) => colormap.id)).toEqual([
       ...ILLUSTRATION_SCHEMES.map(option => option.value),
+      ...PBR_SCHEMES.map(option => option.value),
       ...REFERENCE_SCHEMES.map(option => option.value),
       "vesta-soft",
       "vesta",
@@ -83,6 +92,7 @@ describe("color schemes", () => {
     ]);
     expect(COLOR_SCHEME_OPTIONS.map(({ label, value }) => ({ label, value }))).toEqual([
       ...ILLUSTRATION_SCHEMES,
+      ...PBR_SCHEMES.map(({ label, value }) => ({ label, value })),
       ...REFERENCE_SCHEMES,
       { label: "VESTA Soft", value: "vesta-soft" },
       { label: "VESTA", value: "vesta" },
@@ -94,6 +104,7 @@ describe("color schemes", () => {
   test("orders softened schemes before their source schemes", () => {
     expect(COLOR_SCHEME_OPTIONS.map((option) => option.value)).toEqual([
       ...ILLUSTRATION_SCHEMES.map(option => option.value),
+      ...PBR_SCHEMES.map(option => option.value),
       ...REFERENCE_SCHEMES.map(option => option.value),
       "vesta-soft",
       "vesta",
@@ -122,21 +133,39 @@ describe("color schemes", () => {
     }
   });
 
+  test("PBR palettes preserve the approved core pairs across the complete existing element table", () => {
+    const referenceElements = Object.keys(COLOR_SCHEMES.find(scheme => scheme.id === "paul-tol-bright")!.elements).sort();
+    for (const { value, pair } of PBR_SCHEMES) {
+      const elements = COLOR_SCHEMES.find(scheme => scheme.id === value)!.elements;
+      expect(Object.keys(elements).sort()).toEqual(referenceElements);
+      for (const color of Object.values(elements)) expect(color).toMatch(/^#[0-9a-f]{6}$/);
+      for (const element of ["Cu", "Na"]) expect(elementColorForScheme(element, value)).toBe(pair[0]);
+      for (const element of ["I", "Cl"]) expect(elementColorForScheme(element, value)).toBe(pair[1]);
+      expect(colorSchemeTokenStyle(value, ["Cu", "I"]).background)
+        .toBe(`linear-gradient(90deg, ${pair[0]} 0% 50%, ${pair[1]} 50% 100%)`);
+    }
+  });
+
   test("previews the current structure's elements instead of a fixed CuI swatch", () => {
     const expected = `linear-gradient(90deg, ${elementColorForScheme("Na", "summer-meadow")} 0% 50%, ${elementColorForScheme("Cl", "summer-meadow")} 50% 100%)`;
     expect(colorSchemeTokenStyle("summer-meadow", ["Na", "Cl", "Na"]).background).toBe(expected);
     expect(colorSchemeTokenStyle("summer-meadow", ["not-an-element"])).toEqual(colorSchemeTokenStyle("summer-meadow"));
   });
 
-  test("illustration and reference themes distinguish representative non-CuI materials", () => {
+  test("illustration, PBR and reference themes distinguish representative materials", () => {
     const materials = [
       ["Na", "Cl"], ["Si", "O"], ["Ti", "O"], ["Ga", "N"],
       ["Cs", "Pb", "I"], ["Li", "Fe", "P", "O"], ["C", "H", "N", "O"],
       ["Zn", "O"], ["Ni", "O"], ["Ca", "Ti", "O"], ["Mo", "S"], ["Zn", "S"],
       ["Ca", "P", "O"], ["Cu", "Fe", "I"], ["Cu", "Pb", "I"], ["Cu", "Ni", "I"], ["Fe", "N"],
     ];
-    for (const {value} of [...ILLUSTRATION_SCHEMES, ...REFERENCE_SCHEMES]) {
-      for (const elements of materials) {
+    const additionalPbrMaterials = [
+      ["Al", "Si", "O"], ["Li", "Al", "Si", "O"], ["Na", "Al", "Si", "O"], ["Si", "N"],
+      ["Hg", "Cl", "O"], ["Ba", "Ca", "Cu", "Hg", "O"], ["Cu", "Zn", "Se", "I"], ["Cu", "Ge", "Te", "I"],
+    ];
+    for (const {value} of [...ILLUSTRATION_SCHEMES, ...PBR_SCHEMES, ...REFERENCE_SCHEMES]) {
+      const compositions = value.startsWith("pbr-") ? [...materials, ...additionalPbrMaterials] : materials;
+      for (const elements of compositions) {
         for (let i = 0; i < elements.length; i++) for (let j = i + 1; j < elements.length; j++) {
           const first = elementColorForScheme(elements[i]!, value);
           const second = elementColorForScheme(elements[j]!, value);
@@ -180,10 +209,10 @@ describe("color schemes", () => {
     }
   });
 
-  test("reference assignments are stable across material composition and custom edits", () => {
-    for (const { value } of REFERENCE_SCHEMES) {
+  test("PBR and reference assignments are stable across material composition and custom edits", () => {
+    for (const { value } of [...PBR_SCHEMES, ...REFERENCE_SCHEMES]) {
       const style = { ...createDefaultStyle(), colorScheme: value, colorSchemeMode: "preset" as const, distinguishSimilarColors: false };
-      for (const elements of [["Cu", "I"], ["Ni", "O"], ["Zn", "O"], ["Li", "Fe", "P", "O"]]) {
+      for (const elements of [["Cu", "I"], ["Na", "Cl"], ["Ni", "O"], ["Zn", "O"], ["Li", "Fe", "P", "O"], ["Cu", "Ge", "Te", "I"]]) {
         const colors = createCustomColormapFromStyle(atomsWithElements(elements), style).elements;
         const reversed = createCustomColormapFromStyle(atomsWithElements([...elements].reverse()), style).elements;
         expect(colors).toEqual(reversed);

@@ -1,0 +1,7 @@
+{
+  "id": "pbr-glossy-plastic",
+  "label": "亮面塑料",
+  "description": "Low-roughness dielectric plastic without a separate clearcoat lobe.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.17, "clearcoat": 0, "transmission": 0, "ior": 1.47, "specularIntensity": 0.8, "specularColor": "#ffffff" } },
+  "lighting": []
+}

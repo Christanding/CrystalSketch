@@ -1,5 +1,6 @@
 import { useLayoutEffect } from "react";
 import { MeasurementAnnotations } from "./MeasurementAnnotations";
+import { AnnotationLayer } from "./renderOverlay";
 import { OrthographicCamera } from "three";
 import { useThree } from "@react-three/fiber";
 
@@ -67,10 +68,10 @@ export function ExportSceneContent({
   return (
     <>
       {fogColor ? <SceneFog color={fogColor} layout={layout} style={style} /> : null}
-      <group position={layout.groupPosition}>
+      <AnnotationLayer position={layout.groupPosition}>
         <MeasurementAnnotations scene={scene} scale={layout.span} color={unitCellLineColor}
           style={style} showAtoms={showAtoms} atomOpacity={componentOpacity.atoms} bondOpacity={componentOpacity.bonds} />
-      </group>
+      </AnnotationLayer>
       <MemoizedStructureSceneObjects
         componentOpacity={componentOpacity}
         groupPosition={layout.groupPosition}

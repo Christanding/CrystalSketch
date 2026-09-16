@@ -1,0 +1,7 @@
+{
+  "id": "pbr-velvet",
+  "label": "丝绒柔光",
+  "description": "Rough fabric approximation with neutral sheen, without generated fiber geometry.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.86, "clearcoat": 0, "transmission": 0, "ior": 1.45, "specularIntensity": 0.2, "specularColor": "#ffffff", "sheen": 1, "sheenColor": "#ffffff", "sheenRoughness": 0.62 } },
+  "lighting": []
+}

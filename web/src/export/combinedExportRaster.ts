@@ -36,6 +36,7 @@ import {
   renderLegendCanvas,
 } from "./legendExport";
 import { renderExportRaster } from "./structureRasterExport";
+import type { FigureRenderControl } from "./types";
 import {
   CRYSTAL_AXIS_LABEL_HALO_COLOR,
   crystalAxisExportSize,
@@ -44,6 +45,7 @@ import {
 const EXPORT_ACCESSORY_PADDING_RATIO = 0.08;
 
 export interface CombinedExportRasterOptions {
+  renderControl?: FigureRenderControl;
   cameraPose: CameraPoseSnapshot;
   componentOpacity: ComponentOpacityState;
   componentVisibility: ComponentVisibilityState;
@@ -73,6 +75,7 @@ export interface PreparedCombinedExport {
 }
 
 export async function prepareCombinedExportLayers({
+  renderControl,
   cameraPose,
   componentOpacity,
   componentVisibility,
@@ -94,6 +97,7 @@ export async function prepareCombinedExportLayers({
     }
 
     const structureImage = await renderExportRaster({
+      renderControl,
       cameraPose,
       componentOpacity,
       componentVisibility,

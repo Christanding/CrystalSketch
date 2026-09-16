@@ -1,0 +1,7 @@
+{
+  "id": "pbr-matte",
+  "label": "物理磨砂",
+  "description": "A soft dielectric surface for clear scientific studio illustrations.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.72, "clearcoat": 0, "transmission": 0, "ior": 1.45 } },
+  "lighting": []
+}

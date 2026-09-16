@@ -6,14 +6,13 @@ import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeome
 import type { UnitCellLineStyle } from "../model";
 import {
   CELL_FRAME_COLOR,
+  CELL_FRAME_DASH_SIZE,
+  CELL_FRAME_GAP_SIZE,
   CELL_FRAME_LINE_WIDTH_PIXELS,
   cellFrameLinePositions,
 } from "./sceneGeometry";
 import { STRUCTURE_RENDER_ORDER } from "./renderOrder";
 import type { VectorTuple } from "./viewMath";
-
-const CELL_FRAME_DASH_SIZE = 0.08;
-const CELL_FRAME_GAP_SIZE = 0.03;
 
 export function CellFrame({
   color = CELL_FRAME_COLOR,

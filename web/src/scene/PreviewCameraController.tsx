@@ -238,6 +238,11 @@ export function PreviewCameraController({
     interaction.lastQuaternion.copy(camera.quaternion);
     interaction.lastZoom = getCameraZoomSnapshot();
     interaction.waitingForIdle = false;
+    // Once the controls declare the pose settled, discard their sub-threshold
+    // deltas too. Later demand frames (for example render progress) must not
+    // revive an invisible inertia tail and invalidate path-traced samples.
+    clearCameraControlsMotion(controlsRef.current);
+    trackballInertiaPendingRef.current = false;
     onCameraControlsInteractionActiveChangeRef.current?.(
       false,
       camera.quaternion.clone(),
@@ -777,6 +782,11 @@ export function PreviewCameraController({
       trackballInertiaPendingRef.current;
     if (hasPendingTrackballInertia && controlsUpdated && !cameraMoved) {
       trackballInertiaPendingRef.current = false;
+      const state = controlsRef.current as CameraControlsStateSource | null;
+      if (state?.state === CAMERA_CONTROLS_STATE_NONE
+        && (state.keyState === undefined || state.keyState === CAMERA_CONTROLS_STATE_NONE)) {
+        clearCameraControlsMotion(controlsRef.current);
+      }
     }
     if (cameraMoved) {
       trackballInertiaPendingRef.current = true;

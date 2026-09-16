@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { LoaderCircle, RotateCcw, X } from "lucide-react";
+import { RotateCcw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogClose, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { FigureExportLayout } from "../../../model";
+import type { RenderProgress } from "../../../model/renderSettings";
+import { ExportRenderProgress } from "./ExportTab";
 import type { FigurePreviewContent, FigurePreviewState } from "../../../export/figurePreview";
 import {
   currentFigureExportMargins,
@@ -17,6 +19,8 @@ import type { RasterExportBounds } from "../../../scene/exportRenderer";
 
 interface FigurePreviewDialogProps extends FigurePreviewState {
   layout?: FigureExportLayout;
+  exportProgress?: RenderProgress | null;
+  onCancelExport?: () => void;
   onLayoutChange: (layout: FigureExportLayout | undefined) => void;
   onOpenChange: (open: boolean) => void;
 }
@@ -27,7 +31,7 @@ const CHECKERBOARD_STYLE: CSSProperties = {
   backgroundSize: "16px 16px",
 };
 
-export function FigurePreviewDialog({ open, loading, error, content, layout, onLayoutChange, onOpenChange }: FigurePreviewDialogProps) {
+export function FigurePreviewDialog({ open, loading, error, content, layout, exportProgress, onCancelExport, onLayoutChange, onOpenChange }: FigurePreviewDialogProps) {
   const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -40,8 +44,10 @@ export function FigurePreviewDialog({ open, loading, error, content, layout, onL
             <Button variant="ghost" size="icon" className="size-8" aria-label={t("figurePreview.close")}><X className="size-4" /></Button>
           </DialogClose>
         </div>
-        {loading ? <div className="flex h-[55dvh] items-center justify-center gap-2 text-sm text-muted-foreground" role="status">
-          <LoaderCircle className="size-4 animate-spin motion-reduce:animate-none" />{t("figurePreview.loading")}
+        {loading ? <div className="grid h-[55dvh] place-items-center">
+          <div className="w-full max-w-72">
+            <ExportRenderProgress exportProgress={exportProgress} onCancelExport={onCancelExport} label={t("figurePreview.loading")} />
+          </div>
         </div> : error ? <p role="alert" className="py-8 text-sm text-destructive">{error}</p> : content?.kind === "combined" ? (
           <CombinedPreview content={content} layout={layout} onLayoutChange={onLayoutChange} />
         ) : content?.kind === "separate" ? <SeparatePreview content={content} /> : null}

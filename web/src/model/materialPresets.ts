@@ -12,6 +12,17 @@ import classicMattePresetData from "../data/material-presets/presets/classic-mat
 import glossyPresetData from "../data/material-presets/presets/glossy.json";
 import metallicPresetData from "../data/material-presets/presets/metallic.json";
 import modernMattePresetData from "../data/material-presets/presets/modern-matte.json";
+import pbrCeramicPresetData from "../data/material-presets/presets/pbr-ceramic.json";
+import pbrMattePresetData from "../data/material-presets/presets/pbr-matte.json";
+import pbrMetalPresetData from "../data/material-presets/presets/pbr-metal.json";
+import pbrGlassPresetData from "../data/material-presets/presets/pbr-glass.json";
+import pbrGlazedCeramicPresetData from "../data/material-presets/presets/pbr-glazed-ceramic.json";
+import pbrGlossyPlasticPresetData from "../data/material-presets/presets/pbr-glossy-plastic.json";
+import pbrMatteRubberPresetData from "../data/material-presets/presets/pbr-matte-rubber.json";
+import pbrMirrorMetalPresetData from "../data/material-presets/presets/pbr-mirror-metal.json";
+import pbrFrostedGlassPresetData from "../data/material-presets/presets/pbr-frosted-glass.json";
+import pbrVelvetPresetData from "../data/material-presets/presets/pbr-velvet.json";
+import pbrPearlPresetData from "../data/material-presets/presets/pbr-pearl.json";
 
 export type MaterialPresetId = string;
 export type MaterialPresetMaterialType =
@@ -85,6 +96,17 @@ export interface MaterialPresetOption {
 }
 
 const STATIC_MATERIAL_PRESET_MODULES: Record<string, unknown> = {
+  "../data/material-presets/presets/pbr-ceramic.json": pbrCeramicPresetData,
+  "../data/material-presets/presets/pbr-matte.json": pbrMattePresetData,
+  "../data/material-presets/presets/pbr-metal.json": pbrMetalPresetData,
+  "../data/material-presets/presets/pbr-glass.json": pbrGlassPresetData,
+  "../data/material-presets/presets/pbr-glazed-ceramic.json": pbrGlazedCeramicPresetData,
+  "../data/material-presets/presets/pbr-glossy-plastic.json": pbrGlossyPlasticPresetData,
+  "../data/material-presets/presets/pbr-matte-rubber.json": pbrMatteRubberPresetData,
+  "../data/material-presets/presets/pbr-mirror-metal.json": pbrMirrorMetalPresetData,
+  "../data/material-presets/presets/pbr-frosted-glass.json": pbrFrostedGlassPresetData,
+  "../data/material-presets/presets/pbr-velvet.json": pbrVelvetPresetData,
+  "../data/material-presets/presets/pbr-pearl.json": pbrPearlPresetData,
   "../data/material-presets/presets/cartoon.json": cartoonPresetData,
   "../data/material-presets/presets/soft-ceramic.json": softCeramicPresetData,
   "../data/material-presets/presets/satin-matte.json": satinMattePresetData,
@@ -136,6 +158,7 @@ const MATERIAL_PROP_ALLOWLIST: Record<
     "ior",
     "iridescence",
     "iridescenceIOR",
+    "iridescenceThicknessRange",
     "metalness",
     "reflectivity",
     "roughness",
@@ -171,7 +194,24 @@ export function isMetalMaterialPreset(id: MaterialPresetId): boolean {
   return id === "colored-metal";
 }
 
-export const MATERIAL_PRESET_OPTIONS: MaterialPresetOption[] = MATERIAL_PRESETS.filter(preset => isIllustrationMaterialPreset(preset.id)).map(
+export const PHYSICAL_MATERIAL_PRESET_IDS = [
+  "pbr-ceramic", "pbr-matte", "pbr-metal", "pbr-glass",
+  "pbr-glazed-ceramic", "pbr-glossy-plastic", "pbr-matte-rubber", "pbr-mirror-metal",
+  "pbr-frosted-glass", "pbr-velvet", "pbr-pearl",
+] as const;
+const physicalMaterialPresetIds = new Set<string>(PHYSICAL_MATERIAL_PRESET_IDS);
+
+export function isPhysicalMaterialPreset(id: MaterialPresetId): boolean {
+  return physicalMaterialPresetIds.has(id);
+}
+
+export function isIridescenceThicknessRange(value: unknown): value is [number, number] {
+  return Array.isArray(value) && value.length === 2
+    && value.every(item => typeof item === "number" && Number.isFinite(item) && item >= 0)
+    && value[0] <= value[1];
+}
+
+export const MATERIAL_PRESET_OPTIONS: MaterialPresetOption[] = MATERIAL_PRESETS.filter(preset => isIllustrationMaterialPreset(preset.id) || isPhysicalMaterialPreset(preset.id)).map(
   ({ id, label }) => ({
     label,
     value: id,
@@ -521,6 +561,13 @@ function expectMaterialProps(
   for (const key of Object.keys(props)) {
     if (!allowedProps.has(key)) {
       throw new Error(`${path}.${key} is not supported for ${type}.`);
+    }
+    if (key === "iridescenceThicknessRange") {
+      if (!isIridescenceThicknessRange(props[key])) {
+        throw new Error(`${path}.${key} must be two finite, non-negative numbers in ascending order.`);
+      }
+    } else if (Array.isArray(props[key])) {
+      throw new Error(`${path}.${key} does not support array values.`);
     }
   }
 

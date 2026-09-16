@@ -42,13 +42,14 @@ import { AtomInspectorCard } from "./AtomInspectorCard";
 import { BondInspectorCard } from "./BondInspectorCard";
 import type { BondCutoffRange, SceneSpec } from "../api/scene";
 import { LatticeScene } from "../scene/LatticeScene";
+import { IDLE_RENDER_PROGRESS, type RenderProgress } from "../model/renderSettings";
 import { OrientationGizmo } from "../scene/OrientationGizmo";
 import { crystalAxisColorsForStyle, crystalAxisMaterialForStyle } from "../model/appearance";
 import {
   CommonControlsPanel,
   type CommonPanelTab,
 } from "./controls/CommonControlsPanel";
-import { ViewControlRail } from "./controls/ViewControlRail";
+import { PreviewFpsOverlay, ViewControlRail } from "./controls/ViewControlRail";
 import { createCameraInteractionStore } from "./cameraInteractionStore";
 import {
   ColorPickerRegistryProvider,
@@ -347,6 +348,9 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
     unitCellLineStyle,
     visibleScene,
   } = appearance;
+  const [renderingProgress, setRenderingProgress] = useState<RenderProgress>(IDLE_RENDER_PROGRESS);
+  const [renderingPaused, setRenderingPaused] = useState(false);
+  const [renderingRestart, setRenderingRestart] = useState(0);
   const {
     activeInspectorTab,
     activeObjectsTab,
@@ -429,6 +433,8 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
     visibleScene,
   });
   const {
+    exportProgress,
+    cancelExport,
     exportError,
     exportProjectedSize,
     exportSettings,
@@ -667,6 +673,9 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
           >
             {visibleScene || modelingPreviewScene ? (
               <LatticeScene
+                renderingProgress={setRenderingProgress}
+                renderingPaused={renderingPaused || isExporting}
+                renderingRestart={renderingRestart}
                 comparisonCameraStore={comparison ? comparisonCameraStore : undefined}
                 comparisonViewId={session?.id}
                 cameraAnimatedCommandVersion={cameraAnimatedCommandVersion}
@@ -788,6 +797,8 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
       ) : null}
 
       {active && controlsHost ? createPortal(<>
+      {scene && viewState.showFpsOverlay ? <PreviewFpsOverlay previewFpsStore={previewFpsStore}
+        style={compactPreview ? { right: overlayAvailableArea.right + 8, bottom: overlayAvailableArea.bottom + 48 } : undefined} /> : null}
       {!leftSidebarOpen ? <TooltipProvider delayDuration={500}>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -871,13 +882,13 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
           onInteractionLockedChange={handleInteractionLockedChange}
           onResetView={handleResetView}
           cameraInteractionStore={cameraInteractionStore}
-          previewFpsStore={previewFpsStore}
-          showFps={viewState.showFpsOverlay}
         /> : null}
 
         {scene ? (
           <div>
             <CommonControlsPanel
+              exportProgress={exportProgress}
+              onCancelExport={cancelExport}
               structureExportContent={sourceScene ? <PoscarExportPanel controller={poscarExport} fileName={selectedFileName}
                 disabled={previewStatus === "loading"} /> : undefined}
               toolsContent={<MeasurementToolsPanel tools={measurementTools} visibleAtomIds={visibleAtomIds} />}
@@ -953,6 +964,10 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
             <ContextMenuTrigger asChild>
               <div className="contents">
                 <InspectorSidebar
+                  renderingProgress={renderingProgress}
+                  renderingPaused={renderingPaused || isExporting}
+                  onRenderingPausedChange={isExporting ? undefined : setRenderingPaused}
+                  onRenderingRestart={() => { setRenderingPaused(false); setRenderingRestart(value => value + 1); }}
                   modelingContent={<ModelingPanel controller={modeling.controller} />}
                   sourceScene={sourceScene ?? undefined}
                   deletedSelection={editing.snapshot.deleted}
@@ -1041,6 +1056,7 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
       </>, controlsHost) : null}
     </div>
       <FigurePreviewDialog {...figurePreview} layout={exportSettings.previewLayout}
+        exportProgress={exportProgress} onCancelExport={cancelExport}
         onLayoutChange={handleFigurePreviewLayoutChange} onOpenChange={handleFigurePreviewOpenChange} />
     </SceneSelectionProvider>
   );

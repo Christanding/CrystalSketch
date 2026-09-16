@@ -3,6 +3,8 @@ import { describe, expect, mock, spyOn, test } from "bun:test";
 import { useState } from "react";
 
 import { FigurePreviewDialog } from "../src/app/controls/commonPanel/FigurePreviewDialog";
+import { ExportTabContent } from "../src/app/controls/commonPanel/ExportTab";
+import { TooltipProvider } from "../src/components/ui/tooltip";
 import { createDefaultExportSettings, type FigureExportLayout } from "../src/model";
 import type { FigurePreviewContent } from "../src/export/figurePreview";
 import { i18n } from "../src/i18n";
@@ -16,6 +18,44 @@ const content: FigurePreviewContent = { kind: "combined", settings: createDefaul
 } };
 
 describe("figure preview editing", () => {
+  test("keeps cancellation available during export and hides completed progress when idle", () => {
+    const cancel = mock(() => {});
+    const exportFile = mock(() => {});
+    const props = { error: null, settings: createDefaultExportSettings(), onSettingsChange: () => {},
+      onExport: exportFile, onCancelExport: cancel,
+      exportProgress: { phase: "rendering" as const, samples: 32, targetSamples: 192, elapsedMs: 4200 },
+    };
+    const { rerender } = render(<ExportTabContent {...props} isExporting />, { wrapper: TooltipProvider });
+    expect((screen.getByRole("button", { name: i18n.t("actions.exportFormat", { format: "PNG" }) }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("progressbar", { name: i18n.t("rendering.sampleProgress") }).getAttribute("value")).toBe("32");
+    const cancelButton = screen.getByRole("button", { name: i18n.t("rendering.cancelExport") }) as HTMLButtonElement;
+    expect(cancelButton.disabled).toBe(false);
+    fireEvent.click(cancelButton);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(exportFile).not.toHaveBeenCalled();
+    rerender(<ExportTabContent {...props} isExporting={false} />);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect(screen.queryByRole("button", { name: i18n.t("rendering.cancelExport") })).toBeNull();
+  });
+
+  test("shows preview sampling progress while keeping cancel and close active", () => {
+    const cancel = mock(() => {});
+    const close = mock(() => {});
+    const props = { open: true, loading: true, error: null, content: null,
+      onLayoutChange: () => {}, onOpenChange: close, onCancelExport: cancel,
+    };
+    const { rerender } = render(<FigurePreviewDialog {...props}
+      exportProgress={{ phase: "rendering", samples: 24, targetSamples: 64, elapsedMs: 3100 }} />);
+    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("24");
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("rendering.cancelExport") }));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("figurePreview.close") }));
+    expect(close).toHaveBeenCalledWith(false);
+    rerender(<FigurePreviewDialog {...props} />);
+    expect(screen.queryByRole("progressbar")).toBeNull();
+    expect((screen.getByRole("button", { name: i18n.t("rendering.cancelExport") }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   test("keeps accessory adjustments and margins after close, supports reset, and releases preview URLs", async () => {
     const createUrl = spyOn(URL, "createObjectURL").mockImplementation(() => "blob:preview-test");
     const revokeUrl = spyOn(URL, "revokeObjectURL").mockImplementation(() => {});

@@ -1,4 +1,5 @@
 import type { SceneSpec } from "../api/scene";
+import type { RenderProgress } from "../model/renderSettings";
 import type { CameraOrientationRef } from "../scene/LatticeScene";
 import type {
   ComponentOpacityState,
@@ -11,7 +12,13 @@ import type {
   UnitCellLineStyle,
 } from "../model";
 
+export interface FigureRenderControl {
+  signal?: AbortSignal;
+  onProgress?: (progress: RenderProgress) => void;
+}
+
 export interface CreateFigureExportOptions {
+  renderControl?: FigureRenderControl;
   bondVisibilityOverrides: BondVisibilityOverrides;
   cameraOrientationRef: CameraOrientationRef;
   componentOpacity: ComponentOpacityState;

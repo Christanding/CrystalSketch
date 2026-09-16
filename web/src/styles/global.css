@@ -764,8 +764,9 @@ html[data-motion="reduce"] *::after {
   background: color-mix(in srgb, var(--foreground) 24%, transparent);
   background-clip: padding-box;
 }
-.document-workspace { --document-tabs-left: 328px; --document-tabs-right: 64px; }
-.document-workspace:where(:has(#inspector-sidebar[aria-hidden="false"])) { --document-tabs-right: 376px; }
+.document-workspace { --document-tabs-left: 328px; --document-tabs-right: 64px; --preview-fps-right: 16px; }
+.document-workspace:where(:has(#inspector-sidebar[aria-hidden="false"])) { --document-tabs-right: 376px; --preview-fps-right: 376px; }
+.document-controls > .preview-fps-overlay { pointer-events: none; }
 .document-workspace:where([data-left-sidebar="closed"]) { --document-tabs-left: 80px; }
 header.document-top-dock {
   left: var(--document-tabs-left);

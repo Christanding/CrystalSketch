@@ -23,6 +23,7 @@ class MockControls {
   target = new Vector3();
   touches: Record<string, unknown> = {};
   updateCalls = 0;
+  _lastAngle = 0;
   zoomSpeed = 1.2;
   private listeners = new Map<string, Set<() => void>>();
 
@@ -353,6 +354,32 @@ describe("LatticeScene camera commands", () => {
     act(() => latestFrameCallback?.());
 
     expect(invalidateCalls).toBe(0);
+  });
+
+  test("settled inertia cannot be revived by later progress frames, while active micro-drags still work", () => {
+    const scene = orthogonalScene();
+    render(<LatticeScene cameraCommandVersion={0} cameraInteractionStore={createCameraInteractionStore()}
+      cameraState={createDefaultCrystalCameraState(scene.cell.vectors)} componentOpacity={createDefaultComponentOpacity()}
+      interactionLocked={false} interactionMode="trackball" mouseInertia={true} resetCounter={0}
+      scene={scene} style={createDefaultStyle()} />);
+    const controls = latestControls!;
+    controls.update = () => {
+      mockCamera.quaternion.multiply(new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), controls._lastAngle));
+      controls._lastAngle *= 0.8;
+    };
+    controls.state = 0;
+    controls._lastAngle = 0.0001;
+    act(() => controls.dispatchTestEvent("start"));
+    const activePose = mockCamera.quaternion.clone();
+    act(() => latestFrameCallback?.());
+    expect(mockCamera.quaternion.equals(activePose)).toBe(false);
+    expect(controls._lastAngle).toBeGreaterThan(0);
+    controls.state = -1;
+    act(() => controls.dispatchTestEvent("end"));
+    act(() => latestFrameCallback?.());
+    const settledPose = mockCamera.quaternion.clone();
+    for (let frame = 0; frame < 30; frame++) act(() => latestFrameCallback?.());
+    expect(mockCamera.quaternion.equals(settledPose)).toBe(true);
   });
 
   test("requests a demand frame when controls report a change", () => {

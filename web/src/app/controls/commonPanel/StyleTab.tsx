@@ -30,8 +30,11 @@ import {
 } from "../../../model/colorSchemes";
 import {
   MATERIAL_PRESET_OPTIONS,
+  isPhysicalMaterialPreset,
+  materialPresetById,
   type MaterialPresetId,
 } from "../../../model/materialPresets";
+import { readPhysicalMaterialOverrides, type PhysicalMaterialOverrides } from "../../../model/renderSettings";
 import {
   STYLE_FOG_AMOUNT_MAX,
   STYLE_FOG_AMOUNT_MIN,
@@ -135,6 +138,10 @@ export function StyleTabContent({
     onStyleChange((currentStyle) => ({
       ...currentStyle,
       materialPreset,
+      physicalMaterial: undefined,
+      rendering: !isPhysicalMaterialPreset(materialPreset) && currentStyle.rendering?.mode === "path-traced"
+        ? { ...currentStyle.rendering, mode: "realtime" }
+        : currentStyle.rendering,
     }));
   }
 
@@ -328,6 +335,8 @@ export function StyleTabContent({
           </Select>
         </div>
 
+        {isPhysicalMaterialPreset(style.materialPreset) ? <PhysicalMaterialControls style={style} onStyleChange={onStyleChange} /> : null}
+
         <div
           className={cn(
             "grid min-h-8 grid-cols-[minmax(5.5rem,1fr)_9.5rem] items-center gap-2 rounded-md px-1.5",
@@ -436,6 +445,27 @@ export function StyleTabContent({
       </div>
     </div>
   );
+}
+
+function PhysicalMaterialControls({ style, onStyleChange }: {
+  style: StyleState;
+  onStyleChange: Dispatch<SetStateAction<StyleState>>;
+}) {
+  const { t } = useTranslation();
+  const defaults = materialPresetById(style.materialPreset).material.props;
+  const overrides = readPhysicalMaterialOverrides(style.physicalMaterial);
+  return <div className="my-1" aria-label={t("rendering.physicalMaterial")}>
+    {(["roughness", "metalness", "clearcoat", "transmission"] as const).map(property => {
+      const fallback = property === "roughness" ? 1 : 0;
+      const presetValue = defaults[property];
+      const value = overrides[property] ?? (typeof presetValue === "number" ? presetValue : fallback);
+      return <PercentSliderRow key={property} accessibleLabel={t(`rendering.materialProperties.${property}`)}
+        label={t(`rendering.materialProperties.${property}`)} min={0} max={100} allowZero value={Math.round(value * 100)}
+        onValueChange={percent => onStyleChange(current => ({ ...current,
+          physicalMaterial: { ...current.physicalMaterial, [property]: percent / 100 } satisfies PhysicalMaterialOverrides,
+        }))} />;
+    })}
+  </div>;
 }
 
 function MaterialPresetOptionLabel({

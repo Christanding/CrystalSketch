@@ -1,0 +1,171 @@
+diff --git a/src/core/PathTracingRenderer.js b/src/core/PathTracingRenderer.js
+index 375be3fda69c591258900dc67f59e1e8955e8b27..6c2158867ea08562e6ce001e4924bbac89ecad7a 100644
+--- a/src/core/PathTracingRenderer.js
++++ b/src/core/PathTracingRenderer.js
+@@ -123,6 +123,7 @@ function* renderTask() {
+ 
+ 					_renderer.setRenderTarget( blendTarget2 );
+ 					_blendQuad.render( _renderer );
++					this._latestBlendTarget = blendTarget2;
+ 					_renderer.setRenderTarget( ogRenderTarget );
+ 
+ 				}
+@@ -168,7 +169,7 @@ export class PathTracingRenderer {
+ 
+ 	get target() {
+ 
+-		return this._alpha ? this._blendTargets[ 1 ] : this._primaryTarget;
++		return this._alpha ? this._latestBlendTarget : this._primaryTarget;
+ 
+ 	}
+ 
+@@ -246,6 +247,8 @@ export class PathTracingRenderer {
+ 			} ),
+ 		];
+ 
++		this._latestBlendTarget = this._blendTargets[ 1 ];
++
+ 		// function for listening to for triggered compilation so we can wait for compilation to finish
+ 		// before starting to render
+ 		this._compileFunction = () => {
+@@ -334,6 +337,8 @@ export class PathTracingRenderer {
+ 
+ 	dispose() {
+ 
++		// The low-resolution renderer borrows the main material; do not dispose it.
++		this.material.removeEventListener( 'recompilation', this._compileFunction );
+ 		this._primaryTarget.dispose();
+ 		this._blendTargets[ 0 ].dispose();
+ 		this._blendTargets[ 1 ].dispose();
+@@ -367,6 +372,7 @@ export class PathTracingRenderer {
+ 		_renderer.setClearColor( ogClearColor, ogClearAlpha );
+ 		_renderer.setRenderTarget( ogRenderTarget );
+ 
++		this._latestBlendTarget = _blendTargets[ 1 ];
+ 		this.samples = 0;
+ 		this._task = null;
+ 
+diff --git a/src/core/WebGLPathTracer.js b/src/core/WebGLPathTracer.js
+index 54a9e6043ee02a3407476b7a0c89b766f1d0bbe1..b10392c7f81c0749cd18c1a927f3f8bb72e174b1 100644
+--- a/src/core/WebGLPathTracer.js
++++ b/src/core/WebGLPathTracer.js
+@@ -110,8 +110,7 @@ export class WebGLPathTracer {
+ 		this._clock = new Clock();
+ 		this._compilePromise = null;
+ 
+-		this._lowResPathTracer = new PathTracingRenderer( renderer );
+-		this._lowResPathTracer.tiles.set( 1, 1 );
++		this._lowResPathTracer = null;
+ 		this._quad = new FullScreenQuad( new ClampedInterpolationMaterial( {
+ 			map: null,
+ 			transparent: true,
+@@ -212,7 +211,7 @@ export class WebGLPathTracer {
+ 		camera.updateMatrixWorld();
+ 
+ 		this._pathTracer.setCamera( camera );
+-		this._lowResPathTracer.setCamera( camera );
++		this._lowResPathTracer?.setCamera( camera );
+ 		this.reset();
+ 
+ 	}
+@@ -384,6 +383,12 @@ export class WebGLPathTracer {
+ 
+ 	renderSample() {
+ 
++		if ( this.dynamicLowRes && this.renderToCanvas ) {
++
++			this._ensureLowResPathTracer();
++
++		}
++
+ 		const lowResPathTracer = this._lowResPathTracer;
+ 		const pathTracer = this._pathTracer;
+ 		const renderer = this._renderer;
+@@ -395,7 +400,7 @@ export class WebGLPathTracer {
+ 		if ( this._queueReset ) {
+ 
+ 			pathTracer.reset();
+-			lowResPathTracer.reset();
++			lowResPathTracer?.reset();
+ 			this._queueReset = false;
+ 
+ 			quad.material.opacity = 0;
+@@ -415,7 +420,11 @@ export class WebGLPathTracer {
+ 		// when alpha is enabled we use a manual blending system rather than
+ 		// rendering with a blend function
+ 		pathTracer.alpha = pathTracer.material.backgroundAlpha !== 1 || ! supportsFloatBlending( renderer );
+-		lowResPathTracer.alpha = pathTracer.alpha;
++		if ( lowResPathTracer ) {
++
++			lowResPathTracer.alpha = pathTracer.alpha;
++
++		}
+ 
+ 		if ( this.renderToCanvas ) {
+ 
+@@ -494,12 +503,28 @@ export class WebGLPathTracer {
+ 
+ 	dispose() {
+ 
+-		this._renderQuad.dispose();
+-		this._renderQuad.material.dispose();
++		this._quad.dispose();
++		this._quad.material.dispose();
++		this._lowResPathTracer?.dispose();
++		this._lowResPathTracer = null;
+ 		this._pathTracer.dispose();
+ 
+ 	}
+ 
++	_ensureLowResPathTracer() {
++
++		if ( this._lowResPathTracer === null ) {
++
++			// Cache after first use; its material and fullscreen geometry become shared.
++			const lowResPathTracer = new PathTracingRenderer( this._renderer );
++			this._lowResPathTracer = lowResPathTracer;
++			lowResPathTracer.tiles.set( 1, 1 );
++			lowResPathTracer.setCamera( this.camera );
++
++		}
++
++	}
++
+ 	_updateScale() {
+ 
+ 		// update the path tracer scale if it has changed
+@@ -513,9 +538,17 @@ export class WebGLPathTracer {
+ 			this._pathTracer.getSize( _resolution );
+ 			if ( _resolution.x !== w || _resolution.y !== h ) {
+ 
+-				const lowResScale = this.lowResScale;
+ 				this._pathTracer.setSize( w, h );
+-				this._lowResPathTracer.setSize( Math.floor( w * lowResScale ), Math.floor( h * lowResScale ) );
++
++			}
++
++			// A late activation or lowResScale-only change also needs its own size check.
++			if ( this._lowResPathTracer ) {
++
++				this._lowResPathTracer.setSize(
++					Math.max( 1, Math.floor( w * this.lowResScale ) ),
++					Math.max( 1, Math.floor( h * this.lowResScale ) ),
++				);
+ 
+ 			}
+ 
+diff --git a/src/shader/common/fresnel_functions.glsl.js b/src/shader/common/fresnel_functions.glsl.js
+index a44da72a4abd285da4cd0799248f0db1fcc6a360..6d9c75db03443e3d836216cab298a28f738b3506 100644
+--- a/src/shader/common/fresnel_functions.glsl.js
++++ b/src/shader/common/fresnel_functions.glsl.js
+@@ -53,7 +53,9 @@ export const fresnel_functions = /* glsl */`
+ 	// https://raytracing.github.io/books/RayTracingInOneWeekend.html#dielectrics/schlickapproximation
+ 	float iorRatioToF0( float eta ) {
+ 
+-		return pow( ( 1.0 - eta ) / ( 1.0 + eta ), 2.0 );
++		// GLSL pow is undefined for a negative base, even for an integer exponent.
++		float ratio = ( 1.0 - eta ) / ( 1.0 + eta );
++		return ratio * ratio;
+ 
+ 	}
+ 

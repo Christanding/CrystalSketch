@@ -1,7 +1,11 @@
-import { describe, expect, test } from "bun:test";
-import { createElement } from "react";
+import { describe, expect, spyOn, test } from "bun:test";
+import { Children, createElement, type ReactElement, type ReactNode } from "react";
+import * as Fiber from "@react-three/fiber";
 import { renderToStaticMarkup } from "react-dom/server";
-import { OrthographicCamera, Quaternion, Vector3 } from "three";
+import { BufferAttribute, BufferGeometry, Color, CylinderGeometry, DataTexture, InstancedMesh, Mesh, MeshPhysicalMaterial, NeutralToneMapping, NoToneMapping, OrthographicCamera, Quaternion, Scene, ShaderMaterial, SphereGeometry, Texture, Vector3 } from "three";
+import { PathTracingSceneGenerator } from "three-gpu-pathtracer";
+import * as PathTracerLibrary from "three-gpu-pathtracer";
+import type { WebGLPathTracer } from "three-gpu-pathtracer";
 
 import type { AtomSpec, BondSpec, SceneSpec } from "../src/api/scene";
 import { DEFAULT_MEASUREMENT_STYLE, resolveMeasurement } from "../src/model/measurements";
@@ -66,7 +70,13 @@ import {
   type StructureExportFramePlan,
 } from "../src/scene/exportFrame";
 import { structureLineWidthScale } from "../src/scene/exportRenderer";
-import { exportFogColor } from "../src/scene/ExportSceneContent";
+import { renderStructureRasterImage } from "../src/scene/exportRenderer";
+import { ExportSceneContent, exportFogColor } from "../src/scene/ExportSceneContent";
+import * as CartoonOutline from "../src/scene/CartoonOutline";
+import * as PathTracingSceneModule from "../src/scene/pathTracingScene";
+import { renderPathTracedExport } from "../src/scene/pathTracingExport";
+import { readRenderSettings } from "../src/model/renderSettings";
+import { isPhysicalMaterialPreset, materialPresetById, MATERIAL_PRESET_OPTIONS, PHYSICAL_MATERIAL_PRESET_IDS } from "../src/model/materialPresets";
 import {
   applyOrthographicFrustum,
   computeCameraFitZoom,
@@ -74,6 +84,105 @@ import {
   computeStandardCameraPose,
 } from "../src/scene/viewMath";
 import { computeOrientationGizmoAxes } from "../src/scene/orientationGizmoMath";
+import { createCrystalPathTraceScene, type CrystalPathTraceSceneOptions } from "../src/scene/pathTracingScene";
+import { collectTracePrimitives, createPrimitiveSceneUpdater, hasTriangleMeshes, installPrimitiveGeometry, packTracePrimitives } from "../src/scene/pathTracingPrimitives";
+import * as PrimitiveBVH from "../src/scene/pathTracingPrimitiveBVH";
+
+describe("export rendering compatibility", () => {
+  test("keeps legacy outlines, full export dimensions and mesh detail despite restored PBR settings", async () => {
+    const configurations: { width: number; height: number; top: number; left: number }[] = [];
+    const renderedScenes: ReactElement<Parameters<typeof ExportSceneContent>[0]>[] = [];
+    const outlineToneMappings: number[] = [];
+    const downsampledSizes: number[][] = [];
+    const states: Fiber.RootState[] = [];
+    const rootSpy = spyOn(Fiber, "createRoot").mockImplementation(() => {
+      const state = {
+        camera: new OrthographicCamera(), scene: new Scene(), advance() {},
+        gl: { setClearColor() {}, dispose() {}, toneMapping: NoToneMapping, toneMappingExposure: 1 },
+      } as unknown as Fiber.RootState;
+      states.push(state);
+      return {
+        async configure(options: { onCreated?: (state: Fiber.RootState) => void; size: { width: number; height: number; top: number; left: number } }) {
+          configurations.push(options.size);
+          options.onCreated?.(state);
+        },
+        render(tree: ReactNode) {
+          const children = Children.toArray((tree as ReactElement<{ children: ReactNode }>).props.children) as ReactElement<Record<string, unknown>>[];
+          renderedScenes.push(children.find(child => child.type === ExportSceneContent) as ReactElement<Parameters<typeof ExportSceneContent>[0]>);
+          const ready = children.find(child => typeof child.props.onReady === "function");
+          (ready?.props.onReady as () => void)();
+          return { getState: () => state };
+        },
+        unmount() {},
+      } as unknown as ReturnType<typeof Fiber.createRoot>;
+    });
+    const outlineSpy = spyOn(CartoonOutline, "createCartoonRenderer").mockImplementation((renderer, toneMapping) => ({
+      render() { outlineToneMappings.push(toneMapping ?? renderer.toneMapping); }, dispose() {},
+    }));
+    const contextSpy = spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(function (this: HTMLCanvasElement, contextId: string) {
+      expect(contextId).toBe("2d");
+      const target = this;
+      return {
+        fillRect() {},
+        drawImage(source: HTMLCanvasElement, ...coordinates: number[]) {
+          if (coordinates.length === 4) downsampledSizes.push([source.width, source.height, target.width, target.height]);
+        },
+      } as unknown as CanvasRenderingContext2D;
+    } as HTMLCanvasElement["getContext"]);
+    const blobSpy = spyOn(HTMLCanvasElement.prototype, "toBlob").mockImplementation(callback => callback(new Blob(["image"], { type: "image/jpeg" })));
+    try {
+      for (const { value: materialPreset } of MATERIAL_PRESET_OPTIONS.filter(option => !isPhysicalMaterialPreset(option.value))) {
+        const style = { ...createDefaultStyle(), materialPreset, rendering: readRenderSettings({
+          mode: "path-traced", studio: "rim", exposure: 3, aoEnabled: true,
+        }) };
+        const original = structuredClone(style);
+        const image = await renderStructureRasterImage({
+          backgroundColor: "#ffffff", cameraPose: createCameraPoseSnapshot(new Quaternion()),
+          componentOpacity: createDefaultComponentOpacity(), width: 2000, height: 2000,
+          imageFormat: "jpg", lightStrength: 1, meshQuality: "high", scene: sceneWithOffCenterAtoms(),
+          showAtoms: true, showUnitCell: true, style, structureLineWidth: DEFAULT_STRUCTURE_LINE_WIDTH,
+          supersampling: 2, unitCellLineStyle: "solid",
+        });
+        expect({ width: image.width, height: image.height }).toEqual({ width: 2000, height: 2000 });
+        expect(configurations.at(-1)).toEqual({ width: 4000, height: 4000, top: 0, left: 0 });
+        expect(renderedScenes.at(-1)?.props.meshDetail).toBe(EXPORT_SCENE_MESH_DETAIL_PRESETS.high);
+        expect(renderedScenes.at(-1)?.props.style).toBe(style);
+        expect(downsampledSizes.at(-1)).toEqual([4000, 4000, 2000, 2000]);
+        expect(outlineToneMappings.at(-1)).toBe(materialPreset === "colored-metal" ? NeutralToneMapping : NoToneMapping);
+        expect(states.at(-1)?.gl.toneMappingExposure).toBe(1);
+        expect(style).toEqual(original);
+      }
+      expect(outlineToneMappings).toHaveLength(MATERIAL_PRESET_OPTIONS.filter(option => !isPhysicalMaterialPreset(option.value)).length);
+    } finally {
+      blobSpy.mockRestore(); contextSpy.mockRestore(); outlineSpy.mockRestore(); rootSpy.mockRestore();
+    }
+  });
+
+  test("admits the existing 2000-pixel 2x export budget without entering the GPU during validation", async () => {
+    const preparationStop = new Error("stop before GPU allocation");
+    const sceneSpy = spyOn(PathTracingSceneModule, "createCrystalPathTraceScene").mockRejectedValue(preparationStop);
+    const source = sceneWithOffCenterAtoms();
+    const options: Parameters<typeof renderPathTracedExport>[0] = {
+      width: 4000, height: 4000, camera: new OrthographicCamera(),
+      settings: readRenderSettings({ mode: "path-traced" }),
+      source, layout: computeSceneLayout(source), style: { ...createDefaultStyle(), materialPreset: "pbr-ceramic" },
+      meshDetail: EXPORT_SCENE_MESH_DETAIL_PRESETS.high,
+      componentOpacity: createDefaultComponentOpacity(), showAtoms: true, showUnitCell: true,
+      unitCellColor: "#444444", unitCellLineStyle: "solid", background: null,
+      unitCellLineWidth: 1, polyhedronLineWidth: 1, lightStrength: 1,
+      renderer: {} as Parameters<typeof renderPathTracedExport>[0]["renderer"], rasterScene: new Scene(),
+    };
+    try {
+      await expect(renderPathTracedExport({ ...options, width: 4001 })).rejects.toThrow("1600 万内部像素");
+      expect(sceneSpy).not.toHaveBeenCalled();
+      await expect(renderPathTracedExport({ ...options, width: Number.NaN })).rejects.toThrow("1600 万内部像素");
+      expect(sceneSpy).not.toHaveBeenCalled();
+      await expect(renderPathTracedExport(options)).rejects.toBe(preparationStop);
+      expect(sceneSpy).toHaveBeenCalledTimes(1);
+      expect(sceneSpy.mock.calls[0]?.[0].meshDetail).toBe(EXPORT_SCENE_MESH_DETAIL_PRESETS.high);
+    } finally { sceneSpy.mockRestore(); }
+  });
+});
 
 describe("computeSceneLayout", () => {
   test("anchors the preview on the unit-cell center instead of atom distribution", () => {
@@ -1172,6 +1281,480 @@ function standardCubicUp(): [number, number, number] {
 function dot(left: [number, number, number], right: [number, number, number]) {
   return left[0] * right[0] + left[1] * right[1] + left[2] * right[2];
 }
+
+describe("path tracing structure snapshot", () => {
+  function optionsFor(scene: SceneSpec): CrystalPathTraceSceneOptions {
+    return { scene, style: createDefaultStyle(), componentOpacity: { atoms: 100, bonds: 100, polyhedra: 0, unitCell: 0 },
+      groupPosition: [2, 3, 4], showAtoms: true, showUnitCell: false,
+      unitCellColor: "#556677", unitCellRadius: 0.025, polyhedronEdgeRadius: 0.015, quality: "draft" };
+  }
+
+  function snapshotContents(snapshot: Awaited<ReturnType<typeof createCrystalPathTraceScene>>) {
+    const result: unknown[] = [];
+    snapshot.scene.traverse(object => {
+      if (!(object instanceof Mesh)) return;
+      const geometry = object.geometry as BufferGeometry;
+      const { uuid: _uuid, metadata: _metadata, ...material } = (object.material as MeshPhysicalMaterial).toJSON();
+      result.push({ name: object.name, material, position: object.position.toArray(), scale: object.scale.toArray(),
+        quaternion: object.quaternion.toArray(), index: Array.from(object.geometry.index?.array ?? []),
+        attributes: Object.fromEntries(Object.entries(geometry.attributes).map(([name, attribute]) =>
+          [name, { itemSize: attribute.itemSize, data: Array.from(attribute.array) }])) });
+    });
+    return result;
+  }
+
+  test("updates material, palette and positive opacity on the same meshes without retaining old preset properties", async () => {
+    const source = sceneWithOffCenterAtoms(); source.bonds = []; source.polyhedra = [tetrahedronPolyhedron()];
+    const initial = optionsFor(source);
+    initial.showUnitCell = true;
+    initial.componentOpacity = { atoms: 100, bonds: 100, polyhedra: 40, unitCell: 100 };
+    initial.style.materialPreset = "pbr-ceramic";
+    const snapshot = await createCrystalPathTraceScene(initial);
+    const meshes: Mesh[] = []; snapshot.scene.traverse(object => { if (object instanceof Mesh) meshes.push(object); });
+    const geometry = meshes.map(mesh => mesh.geometry), originalScene = snapshot.scene;
+    const environment = new Texture(); snapshot.scene.environment = environment;
+    try {
+      for (const preset of ["pbr-glass", "pbr-ceramic", "pbr-glass", "pbr-ceramic"] as const) {
+        const next = structuredClone(initial);
+        next.style.materialPreset = preset;
+        next.style.physicalMaterial = preset === "pbr-glass" ? { transmission: 0.7, roughness: 0.12 } : undefined;
+        next.style.colorSchemeMode = "preset"; next.style.colorScheme = "nord"; next.style.distinguishSimilarColors = true;
+        next.style.polyhedronColors = { Si: "#7faa55" };
+        next.style.objectStyles.atomOverrides["Si-0"] = { color: "#ff3366", opacity: 47 };
+        next.style.objectStyles.elementOverrides.Si = { opacity: 83 };
+        next.componentOpacity = { atoms: 73, bonds: 68, polyhedra: 61, unitCell: 88 };
+        next.unitCellColor = "#aabbcc";
+        const fresh = await createCrystalPathTraceScene(next);
+        try {
+          expect(snapshot.updateAppearance(next)).toBe(true);
+          expect(snapshot.scene === originalScene && snapshot.scene.environment === environment).toBe(true);
+          expect(meshes.every((mesh, i) => snapshot.scene.getObjectByName(mesh.name) === mesh && mesh.geometry === geometry[i])).toBe(true);
+          expect(snapshotContents(snapshot)).toEqual(snapshotContents(fresh));
+        } finally { fresh.dispose(); }
+      }
+      snapshot.updateLineRadii(0.04, 0.03);
+      expect(snapshot.updateAppearance({ ...initial, unitCellRadius: 0.04, polyhedronEdgeRadius: 0.03 })).toBe(true);
+    } finally { snapshot.dispose(); environment.dispose(); }
+  });
+
+  test("splits shared two-tone color geometry only where needed and matches a newly built snapshot", async () => {
+    const source = sceneWithOffCenterAtoms();
+    source.bonds = [bond("first", 0, 1), bond("second", 2, 3)];
+    const initial = optionsFor(source); initial.style.materialPreset = "pbr-ceramic";
+    const snapshot = await createCrystalPathTraceScene(initial);
+    const first = snapshot.scene.getObjectByName("first") as Mesh;
+    const second = snapshot.scene.getObjectByName("second") as Mesh;
+    const shared = first.geometry;
+    expect(second.geometry).toBe(shared);
+    const next = structuredClone(initial);
+    next.style.objectStyles.atomOverrides["Si-0"] = { color: "#ff2200", opacity: 66 };
+    next.style.objectStyles.bondOverrides.first = { opacity: 44 };
+    next.style.objectStyles.bondFamilyOverrides[source.bonds[1]!.familyKey] = { opacity: 77 };
+    const fresh = await createCrystalPathTraceScene(next);
+    try {
+      expect(snapshot.updateAppearance(next)).toBe(true);
+      expect(first.geometry === shared).toBe(false);
+      expect(second.geometry === shared).toBe(true);
+      expect(first.geometry.userData.pathTracingCylinder).toBe(true);
+      expect(first.geometry.getAttribute("color").itemSize).toBe(4);
+      expect(snapshotContents(snapshot)).toEqual(snapshotContents(fresh));
+      const unchanged = first.geometry;
+      expect(snapshot.updateAppearance(structuredClone(next))).toBe(true);
+      expect(first.geometry === unchanged && second.geometry === shared).toBe(true);
+      expect(snapshot.updateAppearance(initial)).toBe(true);
+      expect(first.geometry === shared && second.geometry === shared).toBe(true);
+      expect(collectTracePrimitives(snapshot.scene).filter(item => item.kind === "cylinder").every(item => !item.capped)).toBe(true);
+    } finally { fresh.dispose(); snapshot.dispose(); }
+  });
+
+  test("rejects geometry, zero-opacity and visibility changes without partially committing materials", async () => {
+    const initial = optionsFor(sceneWithOffCenterAtoms());
+    initial.style.materialPreset = "pbr-ceramic";
+    initial.scene.bonds = [bond("bond", 0, 1)];
+    const snapshot = await createCrystalPathTraceScene(initial);
+    const before = snapshotContents(snapshot);
+    const changes: ((next: CrystalPathTraceSceneOptions) => void)[] = [
+      next => { next.scene.atoms[0]!.position[0] += 0.1; },
+      next => { next.style.atomRadius += 3; },
+      next => { next.style.objectStyles.atomOverrides["Si-0"] = { radius: 0.123 }; },
+      next => { next.style.objectStyles.bondOverrides.bond = { radius: 0.31 }; },
+      next => { next.style.objectStyles.atomOverrides["Si-0"] = { visible: false }; },
+      next => { next.style.objectStyles.atomOverrides["Si-0"] = { opacity: 0 }; },
+      next => { next.componentOpacity.bonds = 0; },
+      next => { next.componentOpacity.polyhedra = 40; },
+      next => { next.style.bondColorMode = "unicolor"; },
+      next => { next.showAtoms = false; },
+      next => { next.unitCellLineStyle = "dashed"; },
+      next => { next.groupPosition[0] += 1; },
+    ];
+    try {
+      for (const change of changes) {
+        const next = structuredClone(initial); next.style.materialPreset = "pbr-glass"; change(next);
+        expect(snapshot.updateAppearance(next)).toBe(false);
+        expect(snapshotContents(snapshot)).toEqual(before);
+      }
+      const controller = new AbortController(); controller.abort();
+      expect(() => snapshot.updateAppearance({ ...initial, signal: controller.signal })).toThrow();
+      expect(snapshotContents(snapshot)).toEqual(before);
+    } finally { snapshot.dispose(); }
+  });
+
+  test("uploads material indices and endpoint colors without refitting unchanged primitive bounds", async () => {
+    const source = sceneWithOffCenterAtoms(); source.bonds = [bond("bond", 0, 1)];
+    const initial = optionsFor(source); initial.style.materialPreset = "pbr-ceramic";
+    const snapshot = await createCrystalPathTraceScene(initial);
+    const { PhysicalPathTracingMaterial } = PathTracerLibrary as unknown as { PhysicalPathTracingMaterial: new () => ShaderMaterial };
+    const material = new PhysicalPathTracingMaterial(), prefix = new MeshPhysicalMaterial(), merged = new BufferGeometry();
+    let resets = 0;
+    const tracer = { _materials: [prefix], _pathTracer: { material }, updateMaterials() {}, reset() { resets++; } } as unknown as WebGLPathTracer;
+    const primitives = collectTracePrimitives(snapshot.scene), packed = packTracePrimitives(tracer, primitives);
+    const bvh = PrimitiveBVH.buildPrimitiveBVH(packed.primitives, packed.bounds);
+    const installed = installPrimitiveGeometry(tracer, bvh.nodes, bvh.nodeCount, packed.extraData, 4096, false);
+    const update = createPrimitiveSceneUpdater(tracer, snapshot.scene, primitives, merged, bvh.nodes, installed, true);
+    const refit = spyOn(PrimitiveBVH, "refitPrimitiveBVH");
+    try {
+      const before = bvh.nodes.slice(), next = structuredClone(initial);
+      next.style.objectStyles.atomOverrides["Si-0"] = { color: "#ff0000" };
+      expect(snapshot.updateAppearance(next)).toBe(true);
+      expect(update(snapshot.scene)).toBe(true);
+      expect(refit).toHaveBeenCalledTimes(0);
+      expect(resets).toBe(1);
+      for (let i = 0; i < before.length; i++) {
+        if (i % 8 === 4 && before[i - 1] !== 0) continue;
+        expect(bvh.nodes[i]).toBe(before[i]);
+      }
+      const texture = material.uniforms.crystalPrimitiveNodes!.value as DataTexture;
+      const data: unknown = texture.image.data;
+      if (!(data instanceof Float32Array)) throw new Error("Expected the packed primitive float texture");
+      expect(Array.from(data.subarray(bvh.nodes.length + 4, bvh.nodes.length + 7))).toEqual([1, 0, 0]);
+      (snapshot.scene.getObjectByName("Si-0") as Mesh).scale.multiplyScalar(1.1);
+      snapshot.scene.updateMatrixWorld(true);
+      expect(update(snapshot.scene)).toBe(true);
+      expect(refit).toHaveBeenCalledTimes(1);
+      expect(resets).toBe(2);
+    } finally { refit.mockRestore(); installed.dispose(); material.dispose(); prefix.dispose(); merged.dispose(); snapshot.dispose(); }
+  });
+
+  test("rejects changed triangle geometry on the same mesh, including in-place attribute updates", () => {
+    const scene = new Scene();
+    const geometry = new BufferGeometry().setAttribute("position", new BufferAttribute(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), 3));
+    const mesh = new Mesh(geometry, new MeshPhysicalMaterial()); mesh.name = "triangle"; scene.add(mesh);
+    const merged = geometry.clone().setAttribute("materialIndex", new BufferAttribute(new Uint32Array(3), 1));
+    merged.addGroup(0, 3, 0);
+    let uploads = 0;
+    const materials = [mesh.material];
+    const tracer = { _materials: materials, _pathTracer: { material: { materialIndexAttribute: { updateFrom() {} } } }, updateMaterials() {} } as unknown as WebGLPathTracer;
+    const installed = { update() { uploads++; }, dispose() {}, restore() {} };
+    const update = createPrimitiveSceneUpdater(tracer, scene, [], merged, new Float32Array(), installed, true);
+    const replacement = geometry.clone(); replacement.getAttribute("position").setX(0, 0.4);
+    try {
+      mesh.geometry = replacement;
+      expect(update(scene)).toBe(false);
+      expect(uploads).toBe(0);
+      expect((tracer as unknown as { _materials: MeshPhysicalMaterial[] })._materials).toBe(materials);
+      mesh.geometry = geometry;
+      geometry.getAttribute("position").setX(0, 0.2); geometry.getAttribute("position").needsUpdate = true;
+      expect(update(scene)).toBe(false);
+      expect(uploads).toBe(0);
+    } finally { geometry.dispose(); replacement.dispose(); merged.dispose(); mesh.material.dispose(); }
+  });
+
+  test("packs actual atom and two-tone bond snapshots without changing identities, dimensions, colors or triangle material indices", async () => {
+    const source = sceneWithOffCenterAtoms();
+    source.atoms = [atom("Si-0", [0, 0, 0]), atom("Si-1", [1, 2, 0.5])];
+    source.bonds = [bond("colored-bond", 0, 1)];
+    const options = optionsFor(source);
+    options.style.materialPreset = "pbr-glass";
+    options.style.objectStyles.atomOverrides = { "Si-0": { color: "#ff0000", radius: 0.63, opacity: 42 }, "Si-1": { color: "#0000ff" } };
+    const sourceBefore = JSON.stringify({ source, style: options.style });
+    const snapshot = await createCrystalPathTraceScene(options);
+    const prefix = new MeshPhysicalMaterial();
+    try {
+      const primitives = collectTracePrimitives(snapshot.scene);
+      expect(primitives.map(primitive => primitive.kind)).toEqual(["sphere", "sphere", "cylinder"]);
+      expect(hasTriangleMeshes(snapshot.scene, primitives)).toBe(false);
+      expect(collectTracePrimitives(snapshot.scene, false)).toHaveLength(2);
+      const materials = [prefix];
+      let updates = 0;
+      const tracer = { _materials: materials, updateMaterials() { updates++; } } as unknown as WebGLPathTracer;
+      const packed = packTracePrimitives(tracer, primitives);
+      expect(materials[0]).toBe(prefix);
+      expect(updates).toBe(1);
+      expect(materials).toEqual([prefix, ...primitives.map(primitive => primitive.mesh.material)]);
+      expect(Array.from(packed.primitives.subarray(0, 6))).toEqual([2, 3, 4, Math.fround(0.63), 1, -1]);
+      expect(primitives[0]!.mesh.material.opacity).toBe(0.42);
+      const cylinder = primitives[2]!;
+      expect(cylinder.kind).toBe("cylinder");
+      if (cylinder.kind !== "cylinder") throw new Error("Missing analytic bond");
+      expect(cylinder.capped).toBe(false);
+      expect(cylinder.halfLength).toBeCloseTo(Math.sqrt(5.25) / 2);
+      expect(Array.from(packed.extraData.subarray(4, 8))).toEqual([1, 0, 0, 0]);
+      expect(Array.from(packed.extraData.subarray(8, 11))).toEqual([0, 0, 1]);
+      const axis = new Vector3().fromArray(cylinder.axis).normalize();
+      const radial = new Vector3(0, 0, 1).cross(axis).normalize();
+      const otherRadial = axis.clone().cross(radial);
+      for (const sign of [-1, 1]) for (let step = 0; step < 16; step++) {
+        const angle = step * Math.PI / 8;
+        const point = new Vector3().fromArray(cylinder.center).addScaledVector(axis, sign * cylinder.halfLength)
+          .addScaledVector(radial, cylinder.radius * Math.cos(angle)).addScaledVector(otherRadial, cylinder.radius * Math.sin(angle));
+        point.toArray().forEach((value, coordinate) => {
+          expect(value).toBeGreaterThanOrEqual(packed.bounds[12 + coordinate]!);
+          expect(value).toBeLessThanOrEqual(packed.bounds[15 + coordinate]!);
+        });
+      }
+      expect(primitives.every(primitive => primitive.mesh.visible)).toBe(true);
+      expect(JSON.stringify({ source, style: options.style })).toBe(sourceBefore);
+    } finally { snapshot.dispose(); prefix.dispose(); }
+  });
+
+  test("leaves textured, deformed, flat, partial and non-circular geometry in the original triangle path", () => {
+    const scene = new Scene();
+    const sphere = () => {
+      const mesh = new Mesh(new SphereGeometry(1, 8, 6), new MeshPhysicalMaterial());
+      mesh.userData.kind = "atom"; scene.add(mesh); return mesh;
+    };
+    const accepted = sphere();
+    const hidden = sphere(); hidden.visible = false;
+    const stretched = sphere(); stretched.scale.y = 2;
+    const flat = sphere(); flat.material.flatShading = true;
+    const colored = sphere(); colored.material.vertexColors = true;
+    const textured = sphere(); textured.material.map = new Texture();
+    const morphed = sphere(); morphed.geometry.morphAttributes.position = [morphed.geometry.attributes.position!.clone()];
+    const sheared = sphere(); sheared.matrixAutoUpdate = false;
+    sheared.matrix.set(1, 0.2, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
+    const cone = new Mesh(new CylinderGeometry(0.5, 1, 2, 8), new MeshPhysicalMaterial());
+    cone.userData.kind = "bond"; scene.add(cone);
+    const partial = new Mesh(new CylinderGeometry(1, 1, 2, 8, 1, false, 0, Math.PI), new MeshPhysicalMaterial());
+    partial.userData.kind = "bond"; scene.add(partial);
+    const instanced = new InstancedMesh(new SphereGeometry(1, 8, 6), new MeshPhysicalMaterial(), 2);
+    instanced.userData.kind = "atom"; scene.add(instanced);
+    try {
+      expect(collectTracePrimitives(scene).map(primitive => primitive.mesh)).toEqual([accepted]);
+      expect(hasTriangleMeshes(scene, collectTracePrimitives(scene))).toBe(true);
+      expect(hidden.visible).toBe(false);
+      expect(stretched.scale.toArray()).toEqual([1, 2, 1]);
+    } finally {
+      textured.material.map.dispose();
+      scene.children.forEach(object => { const mesh = object as Mesh; mesh.geometry.dispose(); (mesh.material as MeshPhysicalMaterial).dispose(); });
+    }
+  });
+
+  test("includes capped cell and polyhedron-edge cylinders but never drops a remaining mesh or visible child", () => {
+    const scene = new Scene();
+    const meshes = ["unit-cell", "polyhedron-edge"].map(kind => {
+      const mesh = new Mesh(new CylinderGeometry(1, 1, 1, 8), new MeshPhysicalMaterial({ color: 0, opacity: 0.95, transparent: true }));
+      mesh.userData.kind = kind; mesh.scale.set(0.02, 3, 0.02); scene.add(mesh); return mesh;
+    });
+    try {
+      const primitives = collectTracePrimitives(scene);
+      expect(primitives).toHaveLength(2);
+      expect(primitives.every(primitive => primitive.kind === "cylinder" && primitive.capped && primitive.halfLength === 1.5)).toBe(true);
+      expect(hasTriangleMeshes(scene, primitives)).toBe(false);
+      expect(primitives[0]!.mesh.material).toBe(meshes[0]!.material);
+      meshes[0]!.material.flatShading = true;
+      expect(hasTriangleMeshes(scene, collectTracePrimitives(scene))).toBe(true);
+      meshes[0]!.material.flatShading = false;
+      scene.remove(meshes[1]!); meshes[0]!.add(meshes[1]!);
+      expect(collectTracePrimitives(scene).some(primitive => primitive.mesh === meshes[0])).toBe(false);
+      expect(hasTriangleMeshes(scene, collectTracePrimitives(scene))).toBe(true);
+    } finally { meshes.forEach(mesh => { mesh.geometry.dispose(); mesh.material.dispose(); }); }
+  });
+
+  test("rolls back the real vendor shader and owned texture when primitive shader installation throws", () => {
+    const { PhysicalPathTracingMaterial } = PathTracerLibrary as unknown as { PhysicalPathTracingMaterial: new () => ShaderMaterial };
+    const material = new PhysicalPathTracingMaterial();
+    const original = material.fragmentShader;
+    const fault = new Error("forced compilation listener failure");
+    (material as unknown as { addEventListener(type: string, listener: () => void): void })
+      .addEventListener("recompilation", () => { throw fault; });
+    const dispose = spyOn(DataTexture.prototype, "dispose");
+    try {
+      const tracer = { _pathTracer: { material } } as unknown as WebGLPathTracer;
+      expect(() => installPrimitiveGeometry(tracer, new Float32Array([0, 0, 0, 1, 0, 0, -1, 1]), 1, new Float32Array(), 4096)).toThrow(fault);
+      expect(material.fragmentShader).toBe(original);
+      expect(material.uniforms.crystalPrimitiveNodes).toBeUndefined();
+      expect(material.uniforms.crystalPrimitiveNodeCount).toBeUndefined();
+      expect(material.defines.CRYSTAL_HAS_TRIANGLES).toBeUndefined();
+      expect(dispose).toHaveBeenCalledTimes(1);
+    } finally { dispose.mockRestore(); material.dispose(); }
+  });
+
+  test("carries every new PBR preset and the owned thin-film range into traced materials without changing color or geometry", async () => {
+    const scene = sceneWithOffCenterAtoms();
+    scene.atoms = [atom("Si-0", [0, 0, 0]), atom("Si-1", [0, 2, 0])];
+    scene.bonds = [bond("colored-bond", 0, 1)];
+    const sceneBefore = JSON.stringify(scene);
+    let triangleCount: number | undefined;
+    for (const presetId of PHYSICAL_MATERIAL_PRESET_IDS.slice(4)) {
+      const options = optionsFor(scene);
+      options.style.materialPreset = presetId;
+      options.style.objectStyles.atomOverrides = { "Si-0": { color: "#9eafcb", radius: 0.63 }, "Si-1": { color: "#559988" } };
+      const styleBefore = JSON.stringify(options.style);
+      const props = materialPresetById(presetId).material.props;
+      const snapshot = await createCrystalPathTraceScene(options);
+      try {
+        const atomMesh = snapshot.scene.getObjectByName("Si-0") as Mesh;
+        const material = atomMesh.material as MeshPhysicalMaterial;
+        expect(material.color.getHexString()).toBe("9eafcb");
+        expect(atomMesh.scale.toArray()).toEqual([0.63, 0.63, 0.63]);
+        expect(atomMesh.getWorldPosition(new Vector3()).toArray()).toEqual(options.groupPosition);
+        expect(material.opacity).toBe(1);
+        expect(material.transparent).toBe(false);
+        for (const [key, value] of Object.entries(props)) {
+          const actual = (material as unknown as Record<string, unknown>)[key];
+          if (typeof value === "number") expect(actual).toBe(value);
+          else if (actual instanceof Color) expect(actual.getHexString()).toBe("ffffff");
+          else if (key === "iridescenceThicknessRange") {
+            expect(actual).toEqual(value);
+            expect(actual).not.toBe(value);
+          }
+        }
+        const tracedBond = snapshot.scene.getObjectByName("colored-bond") as Mesh;
+        const colors = tracedBond.geometry.getAttribute("color");
+        expect(new Color().fromBufferAttribute(colors, 0).getHexString()).toBe("9eafcb");
+        expect(new Color().fromBufferAttribute(colors, colors.count - 1).getHexString()).toBe("559988");
+        triangleCount ??= snapshot.triangleCount;
+        expect(snapshot.triangleCount).toBe(triangleCount);
+        expect(JSON.stringify(scene)).toBe(sceneBefore);
+        expect(JSON.stringify(options.style)).toBe(styleBefore);
+      } finally { snapshot.dispose(); }
+    }
+  });
+
+  test("uses the selected export mesh quality independently of sampling while preserving preview detail", async () => {
+    const scene = sceneWithOffCenterAtoms();
+    scene.atoms = [atom("Si-0", [0, 0, 0]), atom("Si-1", [0, 2, 0])];
+    scene.bonds = [bond("bond", 0, 1)];
+    const options = optionsFor(scene);
+    options.style.bondColorMode = "unicolor";
+    const preview = await createCrystalPathTraceScene(options);
+    try {
+      const sphere = (preview.scene.getObjectByName("Si-0") as Mesh).geometry as SphereGeometry;
+      expect([sphere.parameters.widthSegments, sphere.parameters.heightSegments]).toEqual([24, 16]);
+    } finally { preview.dispose(); }
+    for (const meshDetail of Object.values(EXPORT_SCENE_MESH_DETAIL_PRESETS)) {
+      const snapshot = await createCrystalPathTraceScene({ ...options, meshDetail });
+      try {
+        const sphere = (snapshot.scene.getObjectByName("Si-0") as Mesh).geometry as SphereGeometry;
+        const cylinder = (snapshot.scene.getObjectByName("bond") as Mesh).geometry as CylinderGeometry;
+        expect([sphere.parameters.widthSegments, sphere.parameters.heightSegments])
+          .toEqual([meshDetail.sphereWidthSegments, meshDetail.sphereHeightSegments]);
+        expect(cylinder.parameters.radialSegments).toBe(meshDetail.bondRadialSegments);
+        expect(options.quality).toBe("draft");
+      } finally { snapshot.dispose(); }
+    }
+  });
+
+  test("preserves periodic atom identity, actual radii, opacity and the bond's two colored halves", async () => {
+    const scene = sceneWithOffCenterAtoms();
+    scene.atoms = [
+      { ...atom("Si-0", [0, 0, 0]), sourceAtomNumber: 17 },
+      { ...atom("Si-1-image", [0, 2, 0]), sourceAtomNumber: 18, isPeriodicImage: true, imageOffset: [0, 1, 0] },
+      atom("hidden", [9, 9, 9]),
+    ];
+    scene.bonds = [bond("colored-bond", 0, 1)];
+    const options = optionsFor(scene);
+    options.style.objectStyles.atomOverrides = {
+      "Si-0": { color: "#ff0000", radius: 0.63, opacity: 42 },
+      "Si-1-image": { color: "#0000ff", radius: 0.37 },
+      hidden: { opacity: 0 },
+    };
+    options.style.objectStyles.bondOverrides = { "colored-bond": { radius: 0.19, opacity: 65 } };
+    const original = JSON.stringify({ scene, style: options.style });
+    const snapshot = await createCrystalPathTraceScene(options);
+    try {
+      const first = snapshot.scene.getObjectByName("Si-0") as Mesh;
+      const image = snapshot.scene.getObjectByName("Si-1-image") as Mesh;
+      const tracedBond = snapshot.scene.getObjectByName("colored-bond") as Mesh;
+      expect(first.getWorldPosition(new Vector3()).toArray()).toEqual([2, 3, 4]);
+      expect(first.scale.x).toBeCloseTo(0.63);
+      expect(first.material).toBeInstanceOf(MeshPhysicalMaterial);
+      expect((first.material as MeshPhysicalMaterial).opacity).toBeCloseTo(0.42);
+      expect(first.userData.sourceAtomNumber).toBe(17);
+      expect(image.getWorldPosition(new Vector3()).toArray()).toEqual([2, 5, 4]);
+      expect(image.userData.imageOffset).toEqual([0, 1, 0]);
+      expect(image.userData.isPeriodicImage).toBe(true);
+      expect(snapshot.scene.getObjectByName("hidden")).toBeUndefined();
+      expect(new Vector3(0, -0.5, 0).applyMatrix4(tracedBond.matrixWorld).toArray()).toEqual([2, 3, 4]);
+      expect(new Vector3(0, 0.5, 0).applyMatrix4(tracedBond.matrixWorld).toArray()).toEqual([2, 5, 4]);
+      expect(tracedBond.scale.x).toBeCloseTo(0.19);
+      expect((tracedBond.material as MeshPhysicalMaterial).opacity).toBeCloseTo(0.65);
+      const colors = tracedBond.geometry.getAttribute("color");
+      expect(colors.itemSize).toBe(4);
+      expect(new Color().fromBufferAttribute(colors, 0).getHexString()).toBe("ff0000");
+      expect(new Color().fromBufferAttribute(colors, colors.count - 1).getHexString()).toBe("0000ff");
+      expect(JSON.stringify({ scene, style: options.style })).toBe(original);
+    } finally { snapshot.dispose(); snapshot.dispose(); }
+  });
+
+  test("merges colored bonds and uncolored spheres into a consistent upstream RGBA buffer", async () => {
+    const scene = sceneWithOffCenterAtoms();
+    scene.atoms = [atom("Si-0", [0, 0, 0]), atom("Si-1", [0, 2, 0])];
+    scene.bonds = [bond("colored-bond", 0, 1)];
+    const options = optionsFor(scene);
+    options.style.materialPreset = "pbr-ceramic";
+    const snapshot = await createCrystalPathTraceScene(options);
+    const generator = new PathTracingSceneGenerator(snapshot.scene);
+    generator.generateBVH = false;
+    try {
+      const result = generator.generate();
+      const geometry = result.geometry;
+      expect(geometry.getAttribute("color").itemSize).toBe(4);
+      expect(geometry.getAttribute("color").count).toBe(geometry.getAttribute("position").count);
+      expect([...geometry.getAttribute("color").array].every(Number.isFinite)).toBe(true);
+      geometry.dispose();
+    } finally { snapshot.dispose(); }
+  });
+
+  test("keeps flat polyhedron facets and converts shared edges and the twelve cell lines once", async () => {
+    const scene = sceneWithOffCenterAtoms();
+    scene.polyhedra = [tetrahedronPolyhedron(), tetrahedronPolyhedron()];
+    const options = optionsFor(scene);
+    options.showAtoms = false;
+    options.showUnitCell = true;
+    options.componentOpacity.polyhedra = 40;
+    options.componentOpacity.unitCell = 100;
+    const snapshot = await createCrystalPathTraceScene(options);
+    try {
+      const meshes: Mesh[] = [];
+      snapshot.scene.traverse(object => { if (object instanceof Mesh) meshes.push(object); });
+      const surfaces = meshes.filter(mesh => mesh.userData.kind === "polyhedron");
+      const edges = meshes.filter(mesh => mesh.userData.kind === "polyhedron-edge");
+      expect(surfaces).toHaveLength(1);
+      expect(edges).toHaveLength(6);
+      expect(meshes.filter(mesh => mesh.userData.kind === "unit-cell")).toHaveLength(12);
+      const normals = surfaces[0]!.geometry.getAttribute("normal");
+      expect(normals.count).toBe(12);
+      for (let index = 0; index < normals.count; index += 3) {
+        const first = new Vector3().fromBufferAttribute(normals, index);
+        expect(first.distanceTo(new Vector3().fromBufferAttribute(normals, index + 1))).toBeLessThan(1e-6);
+        expect(first.distanceTo(new Vector3().fromBufferAttribute(normals, index + 2))).toBeLessThan(1e-6);
+      }
+      expect(edges.every(mesh => mesh.scale.x === options.polyhedronEdgeRadius)).toBe(true);
+      expect(snapshot.scene.userData.studioRadius).toBeGreaterThanOrEqual(5);
+    } finally { snapshot.dispose(); }
+    const dashed = await createCrystalPathTraceScene({ ...options, unitCellLineStyle: "dashed" });
+    try {
+      const dashes: Mesh[] = [];
+      dashed.scene.traverse(object => { if (object instanceof Mesh && object.userData.kind === "unit-cell") dashes.push(object); });
+      expect(dashes.length).toBeGreaterThan(12);
+      expect(dashes.every(mesh => mesh.scale.y <= 0.080001 && mesh.scale.y > 0)).toBe(true);
+      expect(dashes[0]!.scale.y).toBeCloseTo(0.08, 6);
+      expect(dashes[0]!.position.distanceTo(dashes[1]!.position)).toBeCloseTo(0.11, 6);
+    } finally { dashed.dispose(); }
+  });
+
+  test("cancels between preparation batches and rejects geometry above the trace budget", async () => {
+    const scene = sceneWithOffCenterAtoms();
+    scene.atoms = Array.from({ length: 600 }, (_, index) => atom(`Si-${index}`, [index, 0, 0]));
+    const controller = new AbortController();
+    const pending = createCrystalPathTraceScene({ ...optionsFor(scene), signal: controller.signal });
+    setTimeout(() => controller.abort(), 0);
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await expect(createCrystalPathTraceScene({ ...optionsFor(scene), quality: "high" }))
+      .rejects.toMatchObject({ name: "PathTracingSceneError", code: "geometry-limit" });
+  });
+});
 
 function tetrahedronPolyhedron(): SceneSpec["polyhedra"][number] {
   return {

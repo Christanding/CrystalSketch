@@ -1,12 +1,15 @@
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Quaternion } from "three";
 
 import type { SceneSpec } from "../api/scene";
 import type { CameraInteractionStore } from "../model/cameraInteractionStore";
 import type { ComparisonCameraStore } from "../model/comparisonCameraStore";
 import type { PreviewSafeArea } from "../model/layout";
-import { CartoonOutline } from "./CartoonOutline";
+import SceneRenderer from "./SceneRenderer";
+import { readRenderSettings, type RenderProgress } from "../model/renderSettings";
+import { usesStudioLighting } from "./studioEnvironment";
+import { sceneHasTransparency } from "./renderItemPolicy";
 import { MetalEnvironment } from "./MetalEnvironment";
 import {
   DEFAULT_DRAG_SENSITIVITY,
@@ -97,8 +100,13 @@ const CAMERA_ORIENTATION_CHANGE_EPSILON = 0.002;
 const FPS_IDLE_TIMEOUT_MS = 550;
 const FPS_REPORT_INTERVAL_MS = 250;
 const FPS_SMOOTHING_WEIGHT = 0.18;
+const StudioLighting = lazy(() => import("./StudioLighting"));
+const PathTracingPreview = lazy(() => import("./PathTracingPreview"));
 
 export function LatticeScene({
+  renderingProgress,
+  renderingPaused = false,
+  renderingRestart = 0,
   cameraOrientationRef,
   cameraAnimatedCommandVersion = 0,
   cameraInteractionStore,
@@ -144,6 +152,9 @@ export function LatticeScene({
   theme = "light",
   unitCellLineStyle = "solid",
 }: {
+  renderingProgress?: (progress: RenderProgress) => void;
+  renderingPaused?: boolean;
+  renderingRestart?: number;
   cameraOrientationRef?: CameraOrientationRef;
   cameraAnimatedCommandVersion?: number;
   cameraInteractionStore: CameraInteractionStore;
@@ -224,13 +235,18 @@ export function LatticeScene({
     [layout.cameraPose.cameraPosition, layout.cameraPose.distance, layout.span],
   );
   const { materialPreset } = style;
+  const settings = useMemo(() => readRenderSettings(style.rendering), [style.rendering]);
+  const studio = usesStudioLighting(style);
+  const [traceVisible, setTraceVisible] = useState(false);
+  const handleAoError = useCallback(() => renderingProgress?.({ phase: "error", samples: 0, targetSamples: 0,
+    elapsedMs: 0, message: "ao-failed" }), [renderingProgress]);
   const materialFamily = useMemo(
     () => resolveStructureMaterialFamilyForStyle({ materialPreset }),
     [materialPreset],
   );
   const materialFamilies = useMemo(
-    () => resolveStructureMaterialFamiliesForStyle({ materialPreset }),
-    [materialPreset],
+    () => resolveStructureMaterialFamiliesForStyle(style),
+    [materialPreset, style.physicalMaterial],
   );
 
   return (
@@ -245,15 +261,18 @@ export function LatticeScene({
     >
       <color attach="background" args={[previewTheme.background]} />
       <DemandFrameInvalidator />
-      <CartoonOutline presetId={materialPreset} />
-      <MaterialPresetLights
+      <SceneRenderer presetId={materialPreset} settings={settings} traceVisible={traceVisible && studio && settings.mode === "path-traced"}
+        onError={handleAoError} restart={renderingRestart}
+        aoRadius={Math.max(0.1, layout.span / Math.cbrt(Math.max(1, scene.atoms.length)) * 0.65)}
+        transparent={sceneHasTransparency(scene, componentOpacity, style, showAtoms, showUnitCell)} />
+      {studio ? <Suspense fallback={null}><StudioLighting settings={settings} style={style} span={layout.span} lightStrength={lightStrength} /></Suspense> : <MaterialPresetLights
         presetId={materialFamily.id}
         ambientIntensity={style.ambientLightIntensity}
         mainIntensity={style.mainLightIntensity}
         direction={style.lightDirection}
         intensityScale={lightStrength}
         lighting={materialFamily.lighting}
-      />
+      />}
       <PreviewCameraController
         cameraAnimatedCommandVersion={cameraAnimatedCommandVersion}
         cameraCommandVersion={cameraCommandVersion}
@@ -277,7 +296,14 @@ export function LatticeScene({
         resetCounter={resetCounter}
         safeArea={safeArea}
       />
-      <MetalEnvironment presetId={materialPreset} ambientIntensity={style.ambientLightIntensity} intensityScale={lightStrength} />
+      {!studio ? <MetalEnvironment presetId={materialPreset} ambientIntensity={style.ambientLightIntensity} intensityScale={lightStrength} /> : null}
+      {settings.mode === "path-traced" && studio ? <Suspense fallback={null}><PathTracingPreview
+        scene={scene} style={style} settings={settings} layout={layout} componentOpacity={componentOpacity}
+        showAtoms={showAtoms} showUnitCell={showUnitCell} lightStrength={lightStrength}
+        background={previewTheme.background} unitCellColor={previewTheme.unitCell} structureLineWidth={structureLineWidth}
+        unitCellLineStyle={unitCellLineStyle}
+        paused={renderingPaused} restart={renderingRestart} onProgress={renderingProgress} onVisibleChange={setTraceVisible}
+      /></Suspense> : null}
       <PreviewSceneContent
         componentOpacity={componentOpacity}
         fogColor={previewTheme.fog}

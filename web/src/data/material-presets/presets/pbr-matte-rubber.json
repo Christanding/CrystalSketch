@@ -1,0 +1,7 @@
+{
+  "id": "pbr-matte-rubber",
+  "label": "橡胶哑光",
+  "description": "Very rough, weakly specular dielectric with a dry rubber-like appearance.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.95, "clearcoat": 0, "transmission": 0, "ior": 1.45, "specularIntensity": 0.12, "specularColor": "#ffffff" } },
+  "lighting": []
+}

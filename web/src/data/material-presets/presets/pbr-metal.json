@@ -1,0 +1,8 @@
+{
+  "id": "pbr-metal",
+  "label": "物理金属",
+  "description": "A brushed-looking metallic surface with broad studio reflections.",
+  "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0.85, "roughness": 0.28, "clearcoat": 0.12, "clearcoatRoughness": 0.25, "transmission": 0 } },
+  "overrides": { "polyhedron": { "material": { "type": "MeshPhysicalMaterial", "props": { "metalness": 0, "roughness": 0.6, "clearcoat": 0, "transmission": 0 } } } },
+  "lighting": []
+}

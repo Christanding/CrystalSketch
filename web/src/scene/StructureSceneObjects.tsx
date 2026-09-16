@@ -1,5 +1,6 @@
 import { useThree } from "@react-three/fiber";
 import { MeasurementAnnotations } from "./MeasurementAnnotations";
+import { AnnotationLayer } from "./renderOverlay";
 import { memo, useCallback, useLayoutEffect, useMemo } from "react";
 import { Fog } from "three";
 
@@ -135,10 +136,10 @@ export function PreviewSceneContent({
   return (
     <>
       <SceneFog color={fogColor} layout={layout} style={style} />
-      <group position={layout.groupPosition}>
+      <AnnotationLayer position={layout.groupPosition}>
         <MeasurementAnnotations scene={scene} scale={layout.span} color={unitCellLineColor}
           style={style} showAtoms={showAtoms} atomOpacity={componentOpacity.atoms} bondOpacity={componentOpacity.bonds} />
-      </group>
+      </AnnotationLayer>
       <MemoizedStructureSceneObjects
         componentOpacity={componentOpacity}
         groupPosition={layout.groupPosition}

@@ -15,10 +15,12 @@ import {
   withRasterDpi,
 } from "./rasterCanvas";
 import { exportDpi } from "../model/exportSettings";
+import type { FigureRenderControl } from "./types";
 
 const DARK_BACKGROUND_UNIT_CELL_LINE_COLOR = "#bbbbbb";
 
 export async function renderExportRaster({
+  renderControl,
   cameraPose,
   componentOpacity,
   componentVisibility,
@@ -29,6 +31,7 @@ export async function renderExportRaster({
   unitCellLineStyle,
   visibleScene,
 }: {
+  renderControl?: FigureRenderControl;
   cameraPose: CameraPoseSnapshot;
   componentOpacity: ComponentOpacityState;
   componentVisibility: ComponentVisibilityState;
@@ -42,6 +45,7 @@ export async function renderExportRaster({
   const { renderStructureRasterImage } = await import("../scene/exportRenderer");
 
   const image = await renderStructureRasterImage({
+    renderControl,
     backgroundColor: exportBackgroundColor(settings.background),
     cameraPose,
     componentOpacity,
