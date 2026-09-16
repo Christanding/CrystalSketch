@@ -70,28 +70,31 @@ export interface SymmetrySummary {
   latticeSystem: string | null;
 }
 
-const symmetryByFile = new WeakMap<File, Promise<SymmetrySummary>>();
+const symmetryByFile = new WeakMap<File, SymmetrySummary>();
 
-export function readFileSymmetry(file: File, signal?: AbortSignal): Promise<SymmetrySummary> {
+export async function readFileSymmetry(file: File, signal?: AbortSignal): Promise<SymmetrySummary> {
+  signal?.throwIfAborted();
   const cached = symmetryByFile.get(file);
   if (cached) return cached;
   const controller = new AbortController();
   const abort = () => { clearTimeout(timeout); controller.abort(signal?.reason); };
-  signal?.throwIfAborted();
   signal?.addEventListener("abort", abort, { once: true });
   const timeout = setTimeout(() => controller.abort(new DOMException("Symmetry analysis timed out", "TimeoutError")), 15_000);
-  const pending = fetch(apiUrl("/api/structure-symmetry"), {
+  return fetch(apiUrl("/api/structure-symmetry"), {
     method: "POST", body: file, signal: controller.signal,
     headers: { "content-type": "application/octet-stream", "x-crystalsketch-filename": encodeURIComponent(file.name) },
   }).then(async response => {
     if (!response.ok) throw new Error("对称性分析服务不可用");
-    return await response.json() as SymmetrySummary;
-  }).catch(error => { symmetryByFile.delete(file); throw error; }).finally(() => {
+    const symmetry = await response.json() as SymmetrySummary;
+    controller.signal.throwIfAborted();
+    // A pending request belongs to its caller's AbortSignal. Reusing it during
+    // React remounts made the new caller inherit the previous caller's abort.
+    symmetryByFile.set(file, symmetry);
+    return symmetry;
+  }).finally(() => {
     clearTimeout(timeout);
     signal?.removeEventListener("abort", abort);
   });
-  symmetryByFile.set(file, pending);
-  return pending;
 }
 
 export interface AtomSpec {

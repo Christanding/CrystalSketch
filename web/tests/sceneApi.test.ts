@@ -4,6 +4,27 @@ import { readFileSymmetry, uploadStructurePreview } from "../src/api/scene";
 import { apiUrl } from "../src/api/url";
 
 describe("scene API", () => {
+  test("a remounted consumer does not inherit an aborted in-flight symmetry request", async () => {
+    const originalFetch = globalThis.fetch;
+    const file = new File(["structure"], "POSCAR");
+    const first = new AbortController();
+    let calls = 0;
+    globalThis.fetch = Object.assign((_input: RequestInfo | URL, init?: RequestInit) => {
+      calls++;
+      if (calls > 1) return Promise.resolve(Response.json({ available: true, spaceGroupNumber: 227 }));
+      return new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true }));
+    }, { preconnect: originalFetch.preconnect });
+    try {
+      const abandoned = readFileSymmetry(file, first.signal);
+      first.abort();
+      const active = readFileSymmetry(file, new AbortController().signal);
+      await expect(abandoned).rejects.toMatchObject({ name: "AbortError" });
+      await expect(active).resolves.toMatchObject({ available: true, spaceGroupNumber: 227 });
+      await expect(readFileSymmetry(file)).resolves.toMatchObject({ available: true });
+      expect(calls).toBe(2);
+    } finally { globalThis.fetch = originalFetch; }
+  });
+
   test("routes cloud requests to the configured origin while preserving local defaults", async () => {
     const previousBase = process.env.VITE_CRYSTALSKETCH_API_URL;
     const originalFetch = globalThis.fetch;
