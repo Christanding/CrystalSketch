@@ -563,7 +563,7 @@ describe("App", () => {
       within(commonControls)
         .getAllByRole("checkbox")
         .map((checkbox) => checkbox.getAttribute("aria-label")),
-    ).toEqual(["Atoms", "Bonds", "Unit cell", "Polyhedra", "Hide unbonded boundary atoms"]);
+    ).toEqual(["Atoms", "Bonds", "Unit cell boundary", "Polyhedra", "Hide unbonded boundary atoms"]);
   });
 
   test("switches the legend color picker between elements", async () => {
@@ -1734,7 +1734,7 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Set Na color" }).innerHTML).toBe(atomColor);
   });
 
-  test("toggles polyhedra independently from atoms, bonds, and unit cell", async () => {
+  test("toggles polyhedra and unit cell boundary independently and preserves visibility in both export modes", async () => {
     const user = userEvent.setup();
 
     await renderLoadedStructure(user);
@@ -1747,7 +1747,7 @@ describe("App", () => {
       name: "Bonds",
     });
     const unitCellCheckbox = within(commonControls).getByRole("checkbox", {
-      name: "Unit cell",
+      name: "Unit cell boundary",
     });
     const polyhedraCheckbox = within(commonControls).getByRole("checkbox", {
       name: "Polyhedra",
@@ -1770,6 +1770,39 @@ describe("App", () => {
     expect(bondsCheckbox.getAttribute("aria-checked")).toBe("false");
     expect(unitCellCheckbox.getAttribute("aria-checked")).toBe("false");
     expect(polyhedraCheckbox.getAttribute("aria-checked")).toBe("false");
+
+    await user.click(atomsCheckbox);
+    await user.click(bondsCheckbox);
+    for (const mode of ["realtime", "path-traced"] as const) {
+      if (mode === "path-traced") {
+        await user.click(within(commonControls).getByRole("tab", { name: "Style" }));
+        await user.click(within(commonControls).getByRole("combobox", { name: "Material" }));
+        await user.click(await screen.findByRole("option", { name: materialPresetById("pbr-ceramic").label }));
+        await user.click(screen.getByRole("button", { name: "Sidebar" }));
+        const sidebar = screen.getByRole("complementary", { name: "Sidebar" });
+        await user.click(within(sidebar).getByRole("tab", { name: "Render" }));
+        await user.click(within(sidebar).getByRole("radio", { name: "Path tracing" }));
+        await user.click(within(commonControls).getByRole("tab", { name: "Display" }));
+      }
+      for (const visible of [false, true]) {
+        const boundary = within(commonControls).getByRole("checkbox", { name: "Unit cell boundary" });
+        if (boundary.getAttribute("aria-checked") !== String(visible)) await user.click(boundary);
+        expect(boundary.getAttribute("aria-checked")).toBe(String(visible));
+        for (const name of ["Atoms", "Bonds"]) {
+          expect(within(commonControls).getByRole("checkbox", { name }).getAttribute("aria-checked")).toBe("true");
+        }
+        expect(within(commonControls).getByRole("checkbox", { name: "Polyhedra" }).getAttribute("aria-checked")).toBe("false");
+        const count = exportRequests.length;
+        await user.click(within(commonControls).getByRole("tab", { name: "Export" }));
+        await user.click(within(commonControls).getByRole("button", { name: "Export PNG" }));
+        await waitFor(() => expect(exportRequests).toHaveLength(count + 1));
+        const request = exportRequests.at(-1)!;
+        expect(request.componentVisibility).toMatchObject({ atoms: true, bonds: true, polyhedra: false, unitCell: visible });
+        expect(request.componentOpacity.unitCell).toBe(100);
+        expect(request.style.rendering?.mode ?? "realtime").toBe(mode);
+        await user.click(within(commonControls).getByRole("tab", { name: "Display" }));
+      }
+    }
   });
 
   test("shows disabled unchecked Polyhedra control when the scene has no polyhedra", async () => {
@@ -1804,7 +1837,7 @@ describe("App", () => {
     }) as HTMLInputElement;
     const atomsLabel = within(commonControls).getByText("Atoms");
     const unitCellOpacityInput = within(commonControls).getByRole("textbox", {
-      name: "Unit cell opacity value",
+      name: "Unit cell boundary opacity value",
     }) as HTMLInputElement;
     const bondsOpacityInput = within(commonControls).getByRole("textbox", {
       name: "Bonds opacity value",

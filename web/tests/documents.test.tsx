@@ -204,6 +204,7 @@ test("model revision, edit history and preferences use one durable record and ne
     const workspace = createDocumentWorkspace({ ...session(id), scene: modelToScene(after), model: { state: after, revision: 1 } });
     workspace.preferences.modelDocument = true;
     workspace.preferences.viewScale = 1.75;
+    workspace.preferences.appearance.componentVisibility.unitCell = false;
     workspace.preferences.edits.history = [{ kind: "model", patch: createModelPatch(before, after),
       before: { atoms: [], bonds: [] }, after: { atoms: [], bonds: [] },
       references: { before: { measurements: [], focus: null }, after: { measurements: [], focus: null } } }];
@@ -218,6 +219,9 @@ test("model revision, edit history and preferences use one durable record and ne
     const restored = (await loadDocuments()).documents[0]!;
     expect(restored.session.model).toEqual(workspace.session.model);
     expect(restored.preferences).toEqual(workspace.preferences);
+    expect(restored.preferences.appearance.componentVisibility.unitCell).toBe(false);
+    expect(restored.preferences.appearance.componentVisibility.atoms).toBe(true);
+    expect(restored.preferences.appearance.componentOpacity.unitCell).toBe(100);
     const action = restored.preferences.edits.history[0]!;
     if (!("kind" in action)) throw new Error("Expected a typed history action");
     expect(action.kind).toBe("model");

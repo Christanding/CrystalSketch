@@ -295,7 +295,7 @@ export const en = {
     oneHopBondedAtoms: "One-hop bonded atoms",
     periodicImages: "Periodic images",
     polyhedra: "Polyhedra",
-    unitCell: "Unit cell",
+    unitCell: "Unit cell boundary",
     visibleObjects: "Objects",
   },
   figurePreview: {

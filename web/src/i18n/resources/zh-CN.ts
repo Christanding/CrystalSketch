@@ -297,7 +297,7 @@ export const zhCN = {
     oneHopBondedAtoms: "晶胞外的成键原子",
     periodicImages: "周期镜像",
     polyhedra: "多面体",
-    unitCell: "晶胞",
+    unitCell: "晶胞边界线",
     visibleObjects: "物体",
   },
   figurePreview: {

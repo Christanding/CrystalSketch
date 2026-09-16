@@ -1706,7 +1706,7 @@ describe("path tracing structure snapshot", () => {
     } finally { snapshot.dispose(); }
   });
 
-  test("keeps flat polyhedron facets and converts shared edges and the twelve cell lines once", async () => {
+  test("keeps polyhedron facets and edges independent of the unit cell boundary visibility", async () => {
     const scene = sceneWithOffCenterAtoms();
     scene.polyhedra = [tetrahedronPolyhedron(), tetrahedronPolyhedron()];
     const options = optionsFor(scene);
@@ -1733,6 +1733,16 @@ describe("path tracing structure snapshot", () => {
       expect(edges.every(mesh => mesh.scale.x === options.polyhedronEdgeRadius)).toBe(true);
       expect(snapshot.scene.userData.studioRadius).toBeGreaterThanOrEqual(5);
     } finally { snapshot.dispose(); }
+    const hidden = await createCrystalPathTraceScene({ ...options, showUnitCell: false });
+    try {
+      const meshes: Mesh[] = [];
+      hidden.scene.traverse(object => { if (object instanceof Mesh) meshes.push(object); });
+      expect(meshes.filter(mesh => mesh.userData.kind === "unit-cell")).toHaveLength(0);
+      expect(meshes.filter(mesh => mesh.userData.kind === "polyhedron")).toHaveLength(1);
+      expect(meshes.filter(mesh => mesh.userData.kind === "polyhedron-edge")).toHaveLength(6);
+      // Changing boundary visibility changes geometry; never reuse the previous accumulation.
+      expect(hidden.updateAppearance(options)).toBe(false);
+    } finally { hidden.dispose(); }
     const dashed = await createCrystalPathTraceScene({ ...options, unitCellLineStyle: "dashed" });
     try {
       const dashes: Mesh[] = [];

@@ -297,7 +297,7 @@ export const zhTW = {
     oneHopBondedAtoms: "晶胞外鍵結原子",
     periodicImages: "週期影像",
     polyhedra: "多面體",
-    unitCell: "晶胞",
+    unitCell: "晶胞邊界線",
     visibleObjects: "物件",
   },
   figurePreview: {
