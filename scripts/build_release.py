@@ -4,9 +4,10 @@ import argparse
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import zipfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 WEB_ROOT = PROJECT_ROOT / "web"
@@ -33,6 +34,11 @@ def main() -> None:
         run(["uv", "build", "--out-dir", str(staging_dir)], cwd=PROJECT_ROOT)
         wheel_path = newest_wheel(staging_dir)
         verify_wheel_static_assets(wheel_path)
+        source_distributions = list(staging_dir.glob("*.tar.gz"))
+        if not source_distributions:
+            raise SystemExit(f"No source distribution found in {staging_dir}")
+        for source_distribution in source_distributions:
+            verify_source_distribution(source_distribution)
         publish_release_artifacts(staging_dir, dist_dir)
         create_install_bundle(wheel_path, dist_dir)
     if not args.keep_web_static:
@@ -144,6 +150,24 @@ def create_install_bundle(wheel_path: Path, dist_dir: Path) -> None:
         for name in ("README.md", "LICENSE", "THIRD_PARTY_NOTICES.md"):
             bundle.write(PROJECT_ROOT / name, f"CrystalSketch/{name}")
         bundle.write(WEB_ROOT / "public" / "font-licenses.txt", "CrystalSketch/font-licenses.txt")
+
+
+def verify_source_distribution(source_distribution: Path) -> None:
+    development_directories = {
+        "node_modules", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache",
+    }
+    with tarfile.open(source_distribution, "r:gz") as archive:
+        unexpected = []
+        for member in archive.getmembers():
+            parts = PurePosixPath(member.name).parts[1:]
+            if development_directories.intersection(parts) or parts[:2] == ("web", "dist"):
+                unexpected.append(member.name)
+    if unexpected:
+        lines = "\n".join(f"  - {name}" for name in unexpected[:10])
+        raise SystemExit(
+            f"Source distribution contains {len(unexpected)} development output entries:\n{lines}"
+        )
+    print(f"Verified source distribution contents in {source_distribution.name}", flush=True)
 
 
 def verify_wheel_static_assets(wheel_path: Path) -> None:

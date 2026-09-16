@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import importlib.util
+import io
+import tarfile
 import zipfile
 from pathlib import Path
+
+import pytest
 
 
 def _load_build_release_module():
@@ -51,3 +55,38 @@ def test_install_bundle_contains_wheel_launchers_and_user_instructions(tmp_path:
         assert bundle.read("CrystalSketch/install.ps1") == (
             Path(__file__).parents[1] / "scripts" / "install.ps1"
         ).read_bytes()
+
+
+def _source_distribution(tmp_path: Path, paths: list[str]) -> Path:
+    target = tmp_path / "crystalsketch-0.2.1.tar.gz"
+    with tarfile.open(target, "w:gz") as archive:
+        for path in paths:
+            entry = tarfile.TarInfo(f"crystalsketch-0.2.1/{path}")
+            entry.size = 7
+            archive.addfile(entry, io.BytesIO(b"content"))
+    return target
+
+
+def test_source_distribution_accepts_frontend_sources_patch_and_bundled_static(
+    tmp_path: Path,
+) -> None:
+    build_release = _load_build_release_module()
+    source_distribution = _source_distribution(tmp_path, [
+        "pyproject.toml", "web/package.json", "web/bun.lock", "web/src/app/App.tsx",
+        "web/patches/three-gpu-pathtracer@0.0.23.patch",
+        "src/crystalsketch/web_static/index.html",
+        "src/crystalsketch/web_static/assets/pathTracingBVH.worker.js",
+    ])
+    build_release.verify_source_distribution(source_distribution)
+
+
+@pytest.mark.parametrize("path", [
+    "web/node_modules/three/package.json", "web/dist/index.html", ".venv/pyvenv.cfg",
+    "src/crystalsketch/__pycache__/cli.pyc", ".pytest_cache/v/cache/nodeids",
+])
+def test_source_distribution_rejects_generated_development_files(tmp_path: Path, path: str) -> None:
+    build_release = _load_build_release_module()
+    source_distribution = _source_distribution(tmp_path, ["pyproject.toml", path])
+    with pytest.raises(SystemExit, match="development output entries") as error:
+        build_release.verify_source_distribution(source_distribution)
+    assert path in str(error.value)

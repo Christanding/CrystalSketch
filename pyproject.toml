@@ -31,6 +31,10 @@ dev = [
 testpaths = ["tests"]
 pythonpath = ["src"]
 
+[tool.hatch.build.targets.sdist]
+# Keep development outputs out even when VCS ignores are unavailable in a source checkout.
+exclude = ["/web/node_modules", "/web/dist", "/.venv"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py312"
