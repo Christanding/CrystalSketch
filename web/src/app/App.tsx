@@ -127,7 +127,7 @@ export function App() {
   );
 }
 
-function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange, rightSidebarOpen, onRightSidebarOpenChange, active, comparison, comparisonControls, canCompare, onToggleCompare, controlsHost, comparisonCameraStore, onActivate, onOpen, onCreateModel, onClose, register }: DocumentEditorProps) {
+function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange, rightSidebarOpen, onRightSidebarOpenChange, active, comparison, comparisonControls, canCompare, onToggleCompare, controlsHost, comparisonCameraStore, onActivate, onOpen, onCreateModel, onFlushWorkspace, onClose, register }: DocumentEditorProps) {
   const { t } = useTranslation();
   const { resolvedTheme } = useTheme();
   const { reducedMotion } = useMotion();
@@ -997,6 +997,7 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
                     unitCellLineStyle,
                   }}
                   settingsActions={{
+                    onBeforeUpdate: onFlushWorkspace,
                     onLightDirectionChange: lightDirection => setStyle(current => ({ ...current, lightDirection })),
                     onMainLightIntensityChange: mainLightIntensity => setStyle(current => ({ ...current, mainLightIntensity })),
                     onAmbientLightIntensityChange: ambientLightIntensity => setStyle(current => ({ ...current, ambientLightIntensity })),

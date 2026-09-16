@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Info,
   Monitor,
   Moon,
   MonitorCog,
@@ -67,6 +68,7 @@ import {
 } from "../../model";
 import { useAutoBlurSlider } from "../controls/commonPanel/sharedControls";
 import { useCommittedInput } from "../controls/useCommittedInput";
+import { UpdateChecker } from "./UpdateChecker";
 import {
   clampDragSensitivity,
   clampLightStrength,
@@ -162,6 +164,7 @@ export interface InspectorSettingsModel {
 }
 
 export interface InspectorSettingsActions {
+  onBeforeUpdate?: () => Promise<void>;
   onLightDirectionChange?: (direction: [number, number]) => void;
   onMainLightIntensityChange?: (intensity: number) => void;
   onAmbientLightIntensityChange?: (intensity: number) => void;
@@ -604,6 +607,10 @@ export function InspectorSettingsPanel({
             })}
           </ToggleGroup>
         </InspectorSelectRow>
+      </InspectorSettingsSection>
+      <Separator />
+      <InspectorSettingsSection id="inspector-update-settings" icon={Info} title={t("updates.title")}>
+        <UpdateChecker onBeforeApply={actions.onBeforeUpdate} />
       </InspectorSettingsSection>
     </div>
   );

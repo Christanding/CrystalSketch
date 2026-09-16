@@ -236,9 +236,37 @@ def _print_startup_banner(url: str) -> None:
 
 
 def _load_uvicorn_run():
-    from uvicorn import run
+    from uvicorn import Config, Server, run
 
-    return run
+    def run_with_lifecycle(application, **kwargs):
+        from crystalsketch.server.update_worker import UpdateError
+        from crystalsketch.server.updater import UpdateManager
+
+        manager = getattr(getattr(application, "state", None), "update_manager", None)
+        if manager is None:
+            occupancy = UpdateManager()
+            occupancy.register_runtime()
+            try:
+                return run(application, **kwargs)
+            finally:
+                occupancy.service_exited()
+
+        server = Server(Config(application, **kwargs))
+        try:
+            manager.bind_lifecycle(
+                kwargs["host"], kwargs["port"], lambda: setattr(server, "should_exit", True)
+            )
+        except UpdateError as exc:
+            Console(stderr=True).print(
+                "[yellow]CrystalSketch is being updated. Wait for it to restart.[/yellow]"
+            )
+            raise typer.Exit(code=1) from exc
+        try:
+            return server.run()
+        finally:
+            manager.service_exited()
+
+    return run_with_lifecycle
 
 
 def _run_uvicorn(*args: object, **kwargs: object) -> None:

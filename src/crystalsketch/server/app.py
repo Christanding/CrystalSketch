@@ -13,6 +13,8 @@ from starlette.middleware.gzip import GZipMiddleware
 from crystalsketch import __version__
 from crystalsketch.server.prewarm import start_structure_preview_prewarm
 from crystalsketch.server.routes import router
+from crystalsketch.server.update_routes import router as update_router
+from crystalsketch.server.updater import UpdateManager
 
 RESPONSE_GZIP_MINIMUM_SIZE = 4 * 1024
 RESPONSE_GZIP_COMPRESSLEVEL = 6
@@ -23,22 +25,42 @@ def create_app(
     dev_static_fallback: bool = True,
     prewarm_structure_stack: bool = True,
 ) -> FastAPI:
-    lifespan = _lifespan if prewarm_structure_stack else None
-    app = FastAPI(title="CrystalSketch", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="CrystalSketch", version=__version__, lifespan=_lifespan)
+    app.state.update_manager = UpdateManager()
+    app.state.prewarm_structure_stack = prewarm_structure_stack
     app.add_middleware(
         GZipMiddleware,
         minimum_size=RESPONSE_GZIP_MINIMUM_SIZE,
         compresslevel=RESPONSE_GZIP_COMPRESSLEVEL,
     )
     app.include_router(router, prefix="/api")
+    app.include_router(update_router, prefix="/api")
+
+    @app.middleware("http")
+    async def protect_local_update_ui(request, call_next):
+        response = await call_next(request)
+        if app.state.update_manager.lifecycle is not None:
+            response.headers["X-Frame-Options"] = "DENY"
+            policy = response.headers.get("Content-Security-Policy", "")
+            if "frame-ancestors" not in policy:
+                response.headers["Content-Security-Policy"] = (
+                    f"{policy}; frame-ancestors 'none'" if policy else "frame-ancestors 'none'"
+                )
+        return response
+
     _mount_static_web(app, static_root=static_root, dev_static_fallback=dev_static_fallback)
     return app
 
 
 @asynccontextmanager
-async def _lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    start_structure_preview_prewarm()
-    yield
+async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.update_manager.register_runtime()
+    if app.state.prewarm_structure_stack:
+        start_structure_preview_prewarm()
+    try:
+        yield
+    finally:
+        app.state.update_manager.service_exited()
 
 
 def _mount_static_web(

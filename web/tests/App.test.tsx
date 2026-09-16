@@ -645,6 +645,8 @@ describe("App", () => {
     expect(within(sidebar).getByRole("heading", { name: "Appearance" })).toBeTruthy();
     expect(within(sidebar).getByRole("heading", { name: "Rendering" })).toBeTruthy();
     expect(within(sidebar).getByRole("heading", { name: "Interaction" })).toBeTruthy();
+    expect(within(sidebar).getByRole("heading", { name: "About & updates" })).toBeTruthy();
+    expect(within(sidebar).getByRole("button", { name: "Check for updates" })).toBeTruthy();
     expect(within(sidebar).queryByRole("heading", { name: "Analysis" })).toBeNull();
     expect(
       within(sidebar).queryByRole("combobox", { name: "Bonding algorithm" }),
