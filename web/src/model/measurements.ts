@@ -3,6 +3,8 @@ import { applySceneDeletions } from "./sceneEdits";
 
 type Point3 = [number, number, number];
 export type MeasurementDisplayMode = "all" | "distance" | "angle";
+export const MEASUREMENT_FONT_SCALE_MIN = 25;
+export const MEASUREMENT_FONT_SCALE_MAX = 250;
 
 export interface MeasurementStyle {
   color: string;
@@ -114,6 +116,9 @@ export function firstNeighborAtomIds(scene: SceneSpec, seedIds: ReadonlySet<stri
 
 export function filterSceneToAtomIds(scene: SceneSpec, keepIds: ReadonlySet<string>): SceneSpec {
   const deletedIds = new Set(scene.atoms.filter(atom => !keepIds.has(atom.id)).map(atom => atom.id));
+  for (const atom of scene.polyhedronAtoms ?? []) {
+    if (!keepIds.has(atom.id)) deletedIds.add(atom.id);
+  }
   if (deletedIds.size === 0) return scene;
   const filtered = applySceneDeletions(scene, { atoms: deletedIds, bonds: new Set() })!;
   return { ...filtered, summary: scene.summary };

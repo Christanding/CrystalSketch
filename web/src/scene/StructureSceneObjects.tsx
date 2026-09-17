@@ -368,7 +368,7 @@ export function StructureSceneObjects({
         ) : null}
         {isRenderableItem({ opacity: componentOpacity.polyhedra }) ? (
           <MemoizedBatchedPolyhedra
-            atoms={scene.atoms}
+            atoms={scene.polyhedronAtoms ?? scene.atoms}
             materialFamily={materialFamilies.polyhedron}
             opacity={componentOpacity.polyhedra / 100}
             polyhedra={scene.polyhedra}

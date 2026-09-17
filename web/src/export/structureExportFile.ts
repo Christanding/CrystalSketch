@@ -11,6 +11,7 @@ import type {
   FigureExportFile,
 } from "./types";
 import { exportFileStem } from "./fileNames";
+import { composeCombinedExportRaster, structureExportLayers, structureOnlyFigureExportLayout } from "./combinedExportRaster";
 
 export async function createStructureExportFile({
   renderControl,
@@ -40,7 +41,7 @@ export async function createStructureExportFile({
   }
 
   const cameraPose = createCameraPoseSnapshot(cameraOrientationRef.current);
-  const rasterImage = await renderExportRaster({
+  let rasterImage = await renderExportRaster({
     renderControl,
     cameraPose,
     componentOpacity,
@@ -51,7 +52,13 @@ export async function createStructureExportFile({
     structureLineWidth,
     unitCellLineStyle,
     visibleScene,
+    separateMeasurementLabels: true,
   });
+  if (rasterImage.measurementLabels?.length) {
+    rasterImage = await composeCombinedExportRaster({
+      layers: structureExportLayers(rasterImage), width: rasterImage.width, height: rasterImage.height,
+    }, { ...settings, previewLayout: structureOnlyFigureExportLayout(settings.previewLayout) });
+  }
 
   if (settings.format === "pdf") {
     return {

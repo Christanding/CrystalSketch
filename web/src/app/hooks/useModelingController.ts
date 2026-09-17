@@ -184,5 +184,6 @@ export function useModelingController(options: Options) {
       if (defect) latest.current.onLocatePoint(defect.fractionalPosition);
     },
   };
-  return { controller, previewScene: prepared?.scene ?? null, cancel, report, preparedSceneFor };
+  return { controller, previewScene: prepared?.scene ?? null, previewState: prepared?.state ?? null,
+    cancel, report, preparedSceneFor };
 }

@@ -13,6 +13,8 @@ export interface SceneSpec {
     vectors: [number, number, number][];
   };
   atoms: AtomSpec[];
+  /** When present, polyhedra index this array; these atoms do not render as spheres. */
+  polyhedronAtoms?: AtomSpec[];
   bonds: BondSpec[];
   bondFamilies: BondFamilySpec[];
   polyhedra: PolyhedronSpec[];

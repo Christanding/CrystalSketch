@@ -1,10 +1,12 @@
 import type { AtomSpec, SceneSpec } from "../api/scene";
 import type { SceneMeasurement } from "./measurements";
+import type { PolyhedronDisplayState } from "./polyhedronDisplay";
 import { fractionalToCartesian, type ModelState, type Vec3 } from "./structureModel";
 
 export interface ModelReferenceSnapshot {
   measurements: SceneMeasurement[];
   focus: { atomIds: string[]; neighbors: boolean } | null;
+  polyhedronDisplay?: PolyhedronDisplayState;
 }
 export interface ModelReferenceReplay { target: ModelReferenceSnapshot; expected: ModelReferenceSnapshot }
 
@@ -14,13 +16,18 @@ const sameIds = (a: readonly string[], b: readonly string[]) => a.length === b.l
 const sameMeasurement = (a: SceneMeasurement, b: SceneMeasurement) => a.kind === b.kind && sameIds(a.atomIds, b.atomIds);
 const sameFocus = (a: ModelReferenceSnapshot["focus"], b: ModelReferenceSnapshot["focus"]) => a === b
   || Boolean(a && b && a.neighbors === b.neighbors && sameIds(a.atomIds, b.atomIds));
+const samePolyhedronDisplay = (a: PolyhedronDisplayState, b: PolyhedronDisplayState) => a.mode === "auto"
+  ? b.mode === "auto" : b.mode === "selected" && sameIds(a.centerAtomIds, b.centerAtomIds);
+const mapPolyhedronDisplay = (state: PolyhedronDisplayState, map: (id: string) => string): PolyhedronDisplayState =>
+  state.mode === "auto" ? { mode: "auto" } : { mode: "selected", centerAtomIds: state.centerAtomIds.map(map) };
 const mapMeasurement = (measurement: SceneMeasurement, map: (id: string) => string): SceneMeasurement => measurement.kind === "distance"
   ? { ...measurement, atomIds: [map(measurement.atomIds[0]), map(measurement.atomIds[1])] }
   : { ...measurement, atomIds: [map(measurement.atomIds[0]), map(measurement.atomIds[1]), map(measurement.atomIds[2])] };
 
 export function cloneModelReferences(snapshot: ModelReferenceSnapshot): ModelReferenceSnapshot {
   return { measurements: snapshot.measurements.map(m => mapMeasurement(m, id => id)),
-    focus: snapshot.focus ? { ...snapshot.focus, atomIds: [...snapshot.focus.atomIds] } : null };
+    focus: snapshot.focus ? { ...snapshot.focus, atomIds: [...snapshot.focus.atomIds] } : null,
+    ...(snapshot.polyhedronDisplay ? { polyhedronDisplay: mapPolyhedronDisplay(snapshot.polyhedronDisplay, id => id) } : {}) };
 }
 
 /** Replay only the references still owned by this transaction, never later user edits. */
@@ -29,6 +36,12 @@ export function mergeModelReferences(current: ModelReferenceSnapshot, target: Mo
   const targets = new Map(target.measurements.map(m => [m.id, m]));
   const expectations = new Map(expected?.measurements.map(m => [m.id, m]));
   const fallbacks = new Map(fallback.measurements.map(m => [m.id, m]));
+  // Older measurement-only snapshots do not own or reset the polyhedron choice.
+  const polyhedronDisplay = current.polyhedronDisplay
+    ? target.polyhedronDisplay && (!expected || expected.polyhedronDisplay
+      && samePolyhedronDisplay(current.polyhedronDisplay, expected.polyhedronDisplay))
+      ? target.polyhedronDisplay : fallback.polyhedronDisplay ?? current.polyhedronDisplay
+    : undefined;
   return {
     measurements: current.measurements.map(measurement => {
       const next = targets.get(measurement.id), previous = expectations.get(measurement.id);
@@ -38,6 +51,7 @@ export function mergeModelReferences(current: ModelReferenceSnapshot, target: Mo
     }),
     focus: !expected || sameFocus(current.focus, expected.focus)
       ? target.focus ? { ...target.focus, atomIds: [...target.focus.atomIds] } : null : fallback.focus,
+    ...(polyhedronDisplay ? { polyhedronDisplay: mapPolyhedronDisplay(polyhedronDisplay, id => id) } : {}),
   };
 }
 
@@ -121,7 +135,8 @@ export function mapModelReferences(snapshot: ModelReferenceSnapshot, before: Mod
     return result;
   };
   return { measurements: snapshot.measurements.map(m => mapMeasurement(m, map)),
-    focus: snapshot.focus ? { ...snapshot.focus, atomIds: snapshot.focus.atomIds.map(map) } : null };
+    focus: snapshot.focus ? { ...snapshot.focus, atomIds: snapshot.focus.atomIds.map(map) } : null,
+    ...(snapshot.polyhedronDisplay ? { polyhedronDisplay: mapPolyhedronDisplay(snapshot.polyhedronDisplay, map) } : {}) };
 }
 
 export function transitionModelReferences(current: ModelReferenceSnapshot, before: ModelState, after: ModelState,

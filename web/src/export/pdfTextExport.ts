@@ -1,4 +1,4 @@
-import type { PDFDocument, PDFFont } from "pdf-lib";
+import type { PDFDocument, PDFFont, PDFPage } from "pdf-lib";
 
 import type { ExportBackground } from "../model";
 import { DEFAULT_EXPORT_DPI } from "../model/exportSettings";
@@ -67,6 +67,7 @@ export async function encodeRasterTextPdf(
     }
   }
 
+  await drawMeasurementLabelLayers(pdf, page, rasterImage);
   const scale = pdfPointScale(options.dpi ?? DEFAULT_EXPORT_DPI);
   page.setSize(rasterImage.width * scale, rasterImage.height * scale);
   page.scaleContent(scale, scale);
@@ -91,6 +92,7 @@ export async function encodeRasterPdf(rasterImage: RasterExportImage, dpi: numbe
     y: 0,
   });
 
+  await drawMeasurementLabelLayers(pdf, page, rasterImage);
   const scale = pdfPointScale(dpi);
   page.setSize(rasterImage.width * scale, rasterImage.height * scale);
   page.scaleContent(scale, scale);
@@ -99,6 +101,18 @@ export async function encodeRasterPdf(rasterImage: RasterExportImage, dpi: numbe
   const pdfBuffer = new ArrayBuffer(pdfBytes.byteLength);
   new Uint8Array(pdfBuffer).set(pdfBytes);
   return new Blob([pdfBuffer], { type: "application/pdf" });
+}
+
+async function drawMeasurementLabelLayers(pdf: PDFDocument, page: PDFPage, rasterImage: RasterExportImage): Promise<void> {
+  for (const layer of rasterImage.measurementLabels ?? []) {
+    const image = await pdf.embedPng(new Uint8Array(await layer.image.blob.arrayBuffer()));
+    page.drawImage(image, {
+      width: layer.image.width,
+      height: layer.image.height,
+      x: layer.x,
+      y: rasterImage.height - layer.y - layer.image.height,
+    });
+  }
 }
 
 function pdfPointScale(dpi: number): number {

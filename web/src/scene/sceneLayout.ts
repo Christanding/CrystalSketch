@@ -54,6 +54,7 @@ export function computeSceneStructureLayout(
   const points = cellCorners(scene.cell.vectors);
   const box = new Box3().setFromPoints(points);
   const center = cellCenter(scene.cell.vectors);
+  const polyhedronPoints = independentPolyhedronPoints(scene);
   const size = box.getSize(new Vector3());
   const span = Math.max(1, size.x, size.y, size.z);
   const standardPose = computeStandardCameraPose(scene.cell.vectors, span);
@@ -69,6 +70,7 @@ export function computeSceneStructureLayout(
     groupPosition,
     standardPose,
     span,
+    polyhedronPoints,
   );
 
   return {
@@ -76,6 +78,7 @@ export function computeSceneStructureLayout(
       scene,
       groupPosition,
       defaultCameraPose,
+      polyhedronPoints,
     ),
     depthFadingBackOffset: depthFadingRange.backOffset,
     depthFadingFrontOffset: depthFadingRange.frontOffset,
@@ -90,6 +93,7 @@ function computeDepthFadingRange(
   groupPosition: VectorTuple,
   standardPose: Pick<StandardCameraPose, "outward">,
   span: number,
+  polyhedronPoints: Vector3[],
 ): { backOffset: number; frontOffset: number } {
   const outward = new Vector3(...standardPose.outward).normalize();
   const offset = new Vector3(...groupPosition);
@@ -100,7 +104,7 @@ function computeDepthFadingRange(
   let nearestFrontProjection = 0;
   let nearestBackProjection = 0;
 
-  for (const point of points) {
+  for (const point of points.concat(polyhedronPoints)) {
     const projected = point.clone().add(offset).dot(outward);
     nearestFrontProjection = Math.max(nearestFrontProjection, projected);
     nearestBackProjection = Math.min(nearestBackProjection, projected);
@@ -118,6 +122,7 @@ function computeProjectedCameraFitBounds(
   scene: SceneSpec,
   groupPosition: VectorTuple,
   cameraPose: Pick<CrystalCameraPose, "cameraUp" | "outward">,
+  polyhedronPoints: Vector3[],
 ): CameraFitBounds {
   const outward = new Vector3(...cameraPose.outward).normalize();
   const cameraUp = new Vector3(...cameraPose.cameraUp).normalize();
@@ -146,9 +151,33 @@ function computeProjectedCameraFitBounds(
   for (const corner of cellCorners(scene.cell.vectors)) {
     includePoint(corner);
   }
+  for (const point of polyhedronPoints) {
+    includePoint(point);
+  }
+  if (polyhedronPoints.length > 0) {
+    // Fit asymmetric hulls while retaining the camera's existing cell-centered target.
+    maxX = Math.max(Math.abs(minX), Math.abs(maxX));
+    minX = -maxX;
+    maxY = Math.max(Math.abs(minY), Math.abs(maxY));
+    minY = -maxY;
+  }
 
   return {
     projectedHeight: Math.max(1, maxY - minY),
     projectedWidth: Math.max(1, maxX - minX),
   };
+}
+
+function independentPolyhedronPoints(scene: SceneSpec): Vector3[] {
+  const atoms = scene.polyhedronAtoms;
+  if (!atoms) return [];
+  const indices = new Set<number>();
+  for (const polyhedron of scene.polyhedra) {
+    if (polyhedron.faces.length === 0) continue;
+    for (const index of polyhedron.hullAtomIndices) indices.add(index);
+  }
+  return [...indices].flatMap(index => {
+    const atom = atoms[index];
+    return atom ? [new Vector3(...atom.position)] : [];
+  });
 }

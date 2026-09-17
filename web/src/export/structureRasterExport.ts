@@ -1,6 +1,7 @@
 import type { SceneSpec } from "../api/scene";
 import type { CameraPoseSnapshot } from "../scene/cameraPose";
 import type { RasterExportImage } from "../scene/exportRenderer";
+import { displayedMeasurements } from "../scene/MeasurementAnnotations";
 import type {
   ComponentOpacityState,
   ComponentVisibilityState,
@@ -21,6 +22,7 @@ const DARK_BACKGROUND_UNIT_CELL_LINE_COLOR = "#bbbbbb";
 
 export async function renderExportRaster({
   renderControl,
+  separateMeasurementLabels,
   cameraPose,
   componentOpacity,
   componentVisibility,
@@ -32,6 +34,7 @@ export async function renderExportRaster({
   visibleScene,
 }: {
   renderControl?: FigureRenderControl;
+  separateMeasurementLabels?: boolean;
   cameraPose: CameraPoseSnapshot;
   componentOpacity: ComponentOpacityState;
   componentVisibility: ComponentVisibilityState;
@@ -43,14 +46,19 @@ export async function renderExportRaster({
   visibleScene: SceneSpec;
 }): Promise<RasterExportImage> {
   const { renderStructureRasterImage } = await import("../scene/exportRenderer");
+  const hasSeparateLabels = separateMeasurementLabels && visibleScene.measurementStyle?.showLabels !== false
+    && displayedMeasurements(visibleScene).length > 0;
+  // The final compositor owns JPEG encoding; keep a split structure lossless until then.
+  const imageFormat = hasSeparateLabels ? "png" : rasterFormatForExportFormat(settings.format);
 
   const image = await renderStructureRasterImage({
     renderControl,
+    separateMeasurementLabels,
     backgroundColor: exportBackgroundColor(settings.background),
     cameraPose,
     componentOpacity,
     height: settings.height,
-    imageFormat: rasterFormatForExportFormat(settings.format),
+    imageFormat,
     lightStrength,
     meshQuality: settings.meshQuality,
     scene: visibleScene,
@@ -64,5 +72,5 @@ export async function renderExportRaster({
     unitCellLineStyle,
     width: settings.width,
   });
-  return { ...image, blob: await withRasterDpi(image.blob, rasterFormatForExportFormat(settings.format), exportDpi(settings)) };
+  return { ...image, blob: await withRasterDpi(image.blob, imageFormat, exportDpi(settings)) };
 }

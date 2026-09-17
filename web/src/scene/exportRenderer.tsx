@@ -3,7 +3,7 @@ import { withPngDpi } from "../export/pngDpi";
 import { createCartoonRenderer } from "./CartoonOutline";
 import { MetalEnvironment } from "./MetalEnvironment";
 import { useLayoutEffect } from "react";
-import { AgXToneMapping, NeutralToneMapping, NoToneMapping, Quaternion, Vector3 } from "three";
+import { AgXToneMapping, NeutralToneMapping, NoToneMapping, Quaternion, Vector3, type Camera } from "three";
 import { isMetalMaterialPreset, isPhysicalMaterialPreset } from "../model/materialPresets";
 import { readRenderSettings } from "../model/renderSettings";
 import type { FigureRenderControl } from "../export/types";
@@ -30,8 +30,12 @@ import {
 } from "./StructureSceneObjects";
 import { ExportSceneContent } from "./ExportSceneContent";
 import { MaterialPresetLights } from "./MaterialPresetLights";
-import { computeSceneLayout } from "./sceneLayout";
-import { computeStructureExportFramePlan, type StructureExportFramePlan } from "./exportFrame";
+import { computeSceneLayout, type SceneLayout } from "./sceneLayout";
+import { createMeasurementLabelCanvas, displayedMeasurements, measurementLayoutObstacles } from "./MeasurementAnnotations";
+import { DEFAULT_MEASUREMENT_STYLE } from "../model/measurements";
+import { layoutMeasurementLabels, measurementLabelSize, MEASUREMENT_LABEL_CENTER } from "../model/measurementLabelLayout";
+import { ensureFigureFonts } from "../theme/fonts";
+import { computeStructureExportFramePlan, computeStructureProjectedBounds, type StructureExportFramePlan } from "./exportFrame";
 import {
   resolveStructureMaterialFamiliesForStyle,
   resolveStructureMaterialFamilyForStyle,
@@ -56,9 +60,21 @@ export const STRUCTURE_LINE_WIDTH_MIN_PIXELS = 1;
 export interface RasterExportImage {
   blob: Blob;
   contentBounds?: RasterExportBounds;
+  /** Original automatic bounds for accessory placement; excludes manual text offsets and is not a crop bound. */
+  accessoryReferenceBounds?: RasterExportBounds;
   height: number;
+  measurementLabels?: RasterExportMeasurementLabel[];
   textItems?: RasterExportTextItem[];
   width: number;
+}
+
+export interface RasterExportMeasurementLabel {
+  id: string;
+  label: string;
+  image: RasterExportImage;
+  /** Top-left position on the final structure canvas, after supersampling. */
+  x: number;
+  y: number;
 }
 
 export type RasterExportImageFormat = "jpg" | "png";
@@ -91,6 +107,7 @@ export interface RenderStructureRasterOptions {
   lightStrength: number;
   meshQuality: ExportMeshQuality;
   scene: SceneSpec;
+  separateMeasurementLabels?: boolean;
   showAtoms: boolean;
   showUnitCell: boolean;
   style: StyleState;
@@ -128,6 +145,7 @@ export async function renderStructureRasterImage({
   lightStrength,
   meshQuality,
   scene,
+  separateMeasurementLabels = false,
   showAtoms,
   showUnitCell,
   style,
@@ -172,6 +190,14 @@ export async function renderStructureRasterImage({
     style,
     width: renderWidth,
   });
+  // Fit from the original labels, then remove only their sprites from both render paths.
+  const renderScene = separateMeasurementLabels ? { ...scene,
+    measurementStyle: { ...DEFAULT_MEASUREMENT_STYLE, ...scene.measurementStyle, showLabels: false },
+  } : scene;
+  const contentFramePlan = separateMeasurementLabels ? { ...exportFramePlan,
+    bounds: computeStructureProjectedBounds({ cameraPose, componentOpacity, groupPosition: layout.groupPosition,
+      scene: renderScene, showAtoms, showUnitCell, style }),
+  } : exportFramePlan;
   const meshDetail = EXPORT_SCENE_MESH_DETAIL_PRESETS[meshQuality];
   const polyhedronEdgeLineWidthScale = structureLineWidthScale(
     exportFramePlan,
@@ -234,7 +260,7 @@ export async function renderStructureRasterImage({
           materialFamilies={materialFamilies}
           meshDetail={meshDetail}
           polyhedronEdgeLineWidthScale={polyhedronEdgeLineWidthScale}
-          scene={scene}
+          scene={renderScene}
           showAtoms={showAtoms}
           showUnitCell={showUnitCell}
           style={style}
@@ -263,7 +289,7 @@ export async function renderStructureRasterImage({
       finally { cartoonRenderer.dispose(); }
     } else if (rendering.mode === "path-traced") {
       const { renderPathTracedExport } = await import("./pathTracingExport");
-      renderedCanvas = await renderPathTracedExport({ source: scene, style, componentOpacity, showAtoms, showUnitCell,
+      renderedCanvas = await renderPathTracedExport({ source: renderScene, style, componentOpacity, showAtoms, showUnitCell,
         unitCellLineStyle,
         unitCellColor: unitCellLineColor ?? "#444444", background: backgroundColor, width: renderWidth, height: renderHeight,
         layout, meshDetail, camera: state.camera, unitCellLineWidth: unitCellLineWidthScale, polyhedronLineWidth: polyhedronEdgeLineWidthScale,
@@ -279,11 +305,17 @@ export async function renderStructureRasterImage({
     const outputCanvas =
       supersampling === 1 ? renderedCanvas : downsampleCanvas(renderedCanvas, width, height);
     const blob = await canvasToRasterBlob(outputCanvas, imageFormat, backgroundColor);
+    const measurementLabels = separateMeasurementLabels ? await extractMeasurementLabelLayers({
+      scene, camera: state.camera, layout, width, height, supersampling, style, showAtoms,
+      componentOpacity, unitCellLineColor, signal: renderControl?.signal,
+    }) : undefined;
     return {
       blob,
-      contentBounds: structureFrameContentBounds(exportFramePlan, supersampling),
+      contentBounds: structureFrameContentBounds(contentFramePlan, supersampling),
       height,
       width,
+      ...(measurementLabels ? { measurementLabels } : {}),
+      ...(separateMeasurementLabels ? { accessoryReferenceBounds: structureFrameContentBounds(exportFramePlan, supersampling) } : {}),
     };
   } finally {
     root.unmount();
@@ -291,6 +323,71 @@ export async function renderStructureRasterImage({
     canvas.width = canvas.height = 1;
     canvas.remove();
   }
+}
+
+async function extractMeasurementLabelLayers({ scene, camera, layout, width, height, supersampling,
+  style, showAtoms, componentOpacity, unitCellLineColor, signal,
+}: Pick<RenderStructureRasterOptions, "scene" | "width" | "height" | "supersampling" | "style" | "showAtoms"
+  | "componentOpacity" | "unitCellLineColor"> & { camera: Camera; layout: SceneLayout; signal?: AbortSignal }
+): Promise<RasterExportMeasurementLabel[]> {
+  if (scene.measurementStyle?.showLabels === false) return [];
+  const measurements = displayedMeasurements(scene);
+  if (!measurements.length) return [];
+  await ensureFigureFonts();
+  signal?.throwIfAborted();
+  camera.updateMatrixWorld();
+  const positions = layoutMeasurementLabels({
+    measurements, cameraQuaternion: camera.quaternion.toArray(), span: layout.span,
+    fontScale: scene.measurementStyle?.fontScale,
+    ...measurementLayoutObstacles({ scene, style, showAtoms, atomOpacity: componentOpacity.atoms, bondOpacity: componentOpacity.bonds }),
+  });
+  const right = new Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+  const up = new Vector3(0, 1, 0).applyQuaternion(camera.quaternion);
+  const result: RasterExportMeasurementLabel[] = [];
+  for (const measurement of measurements) {
+    signal?.throwIfAborted();
+    const size = measurementLabelSize(measurement.label, layout.span, scene.measurementStyle?.fontScale);
+    const anchor = new Vector3(...(positions.get(measurement.definition.id) ?? measurement.labelPosition))
+      .add(new Vector3(...layout.groupPosition));
+    const topLeft = anchor.clone().addScaledVector(right, -size.width * MEASUREMENT_LABEL_CENTER[0])
+      .addScaledVector(up, size.height * (1 - MEASUREMENT_LABEL_CENTER[1])).project(camera);
+    const bottomRight = anchor.clone().addScaledVector(right, size.width * (1 - MEASUREMENT_LABEL_CENTER[0]))
+      .addScaledVector(up, -size.height * MEASUREMENT_LABEL_CENTER[1]).project(camera);
+    const x = (topLeft.x + 1) * width / 2;
+    const y = (1 - topLeft.y) * height / 2;
+    const pixelWidth = (bottomRight.x - topLeft.x) * width / 2;
+    const pixelHeight = (topLeft.y - bottomRight.y) * height / 2;
+    const layerWidth = Math.max(1, Math.ceil(pixelWidth));
+    const layerHeight = Math.max(1, Math.ceil(pixelHeight));
+    const glyphs = createMeasurementLabelCanvas(measurement.label,
+      scene.measurementStyle?.color ?? unitCellLineColor ?? "#333333", scene.measurementStyle?.fontWeight ?? 400);
+    const canvas = document.createElement("canvas");
+    canvas.width = layerWidth * supersampling;
+    canvas.height = layerHeight * supersampling;
+    let output = canvas;
+    try {
+      const context = canvas.getContext("2d");
+      if (!context) throw new Error("Could not prepare the measurement text export canvas.");
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(glyphs, 0, 0, pixelWidth * supersampling, pixelHeight * supersampling);
+      output = supersampling === 1 ? canvas : downsampleCanvas(canvas, layerWidth, layerHeight);
+      const outputContext = output.getContext("2d");
+      if (!outputContext) throw new Error("Could not inspect the measurement text export canvas.");
+      const ink = alphaBounds(outputContext.getImageData(0, 0, layerWidth, layerHeight).data, layerWidth, layerHeight);
+      const contentBounds = ink ? { minX: ink.minX, minY: ink.minY, maxX: ink.maxX + 1, maxY: ink.maxY + 1,
+        width: ink.maxX - ink.minX + 1, height: ink.maxY - ink.minY + 1 } : undefined;
+      const blob = await canvasToRasterBlob(output, "png", null);
+      signal?.throwIfAborted();
+      result.push({ id: measurement.definition.id, label: measurement.label, x, y,
+        image: { blob, width: layerWidth, height: layerHeight, contentBounds } });
+    } finally {
+      glyphs.width = glyphs.height = 1;
+      canvas.width = canvas.height = 1;
+      output.width = output.height = 1;
+    }
+  }
+  return result;
 }
 
 export function structureLineWidthScale(

@@ -157,9 +157,9 @@ export function visibleSceneForComponents(
           : [],
       )
     : [];
-  const polyhedra = visibility.polyhedra
-    ? scene.polyhedra.flatMap((polyhedron) => remapPolyhedron(polyhedron, atomIndexMap))
-    : [];
+  const polyhedra = !visibility.polyhedra ? []
+    : scene.polyhedronAtoms ? scene.polyhedra
+      : scene.polyhedra.flatMap((polyhedron) => remapPolyhedron(polyhedron, atomIndexMap));
 
   const visibleScene = {
     ...scene,

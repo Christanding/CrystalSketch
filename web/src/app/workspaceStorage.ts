@@ -6,6 +6,8 @@ import type { MeasurementToolsSnapshot } from "./hooks/useMeasurementTools";
 import { exportDpi, isFigureExportLayout } from "../model/exportSettings";
 import { isModelPatch } from "../model/modelHistory";
 import type { SavedPoscarDraft } from "./hooks/usePoscarExportController";
+import { isPolyhedronDisplayState, type PolyhedronDisplayState } from "../model/polyhedronDisplay";
+import { MEASUREMENT_FONT_SCALE_MIN, MEASUREMENT_FONT_SCALE_MAX } from "../model/measurements";
 
 export interface WorkspaceAppearance {
   style: StyleState;
@@ -16,6 +18,7 @@ export interface WorkspaceAppearance {
   unitCellLineStyle: UnitCellLineStyle;
   structureLineWidth: StructureLineWidthState;
   showCrystalAxisLabels: boolean;
+  polyhedronDisplay?: PolyhedronDisplayState;
 }
 
 export interface WorkspacePreferences {
@@ -71,6 +74,9 @@ export function parseWorkspacePreferences(value: string | null): WorkspacePrefer
     throw new Error("Saved workspace is invalid or incompatible.");
   }
   const overrides = state.appearance.bondVisibilityOverrides;
+  if (state.appearance.polyhedronDisplay !== undefined && !isPolyhedronDisplayState(state.appearance.polyhedronDisplay)) {
+    throw new Error("Saved polyhedron selection is invalid.");
+  }
   state.exportSettings = { ...state.exportSettings, dpi: exportDpi(state.exportSettings) };
   if (state.exportSettings.previewLayout !== undefined && !isFigureExportLayout(state.exportSettings.previewLayout)) {
     throw new Error("Saved figure export layout is invalid.");
@@ -78,7 +84,7 @@ export function parseWorkspacePreferences(value: string | null): WorkspacePrefer
   const tools = state.measurementTools;
   const labelStyle = tools?.appearance;
   if (labelStyle !== undefined && (!labelStyle || !/^#[0-9a-f]{6}$/i.test(labelStyle.color)
-    || !Number.isFinite(labelStyle.fontScale) || labelStyle.fontScale < 50 || labelStyle.fontScale > 250
+    || !Number.isFinite(labelStyle.fontScale) || labelStyle.fontScale < MEASUREMENT_FONT_SCALE_MIN || labelStyle.fontScale > MEASUREMENT_FONT_SCALE_MAX
     || ![300, 400, 500, 600].includes(labelStyle.fontWeight) || typeof labelStyle.showLabels !== "boolean"
     || (labelStyle.displayMode !== undefined && !["all", "distance", "angle"].includes(labelStyle.displayMode)))) {
     throw new Error("Saved measurement text settings are invalid.");
@@ -116,14 +122,26 @@ function isSavedSelection(value: unknown): boolean {
 
 function isSavedEditAction(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
-  const action = value as { kind?: unknown; before?: unknown; after?: unknown; patch?: unknown };
+  const action = value as { kind?: unknown; before?: unknown; after?: unknown; patch?: unknown; references?: unknown };
   if (action.kind === undefined) return isSavedSelection(value);
   if (action.kind === "delete") return isSavedSelection(action.before) && isSavedSelection(action.after);
-  if (action.kind === "model") return isModelPatch(action.patch) && isSavedSelection(action.before) && isSavedSelection(action.after);
+  if (action.kind === "model") return isModelPatch(action.patch) && isSavedSelection(action.before) && isSavedSelection(action.after)
+    && hasValidPolyhedronReferences(action.references);
   if (action.kind === "atom-color") return isAtomColorSnapshot(action.before) && isAtomColorSnapshot(action.after)
     && Object.keys(action.before).length === Object.keys(action.after).length
     && Object.keys(action.before).every(id => Object.hasOwn(action.after as object, id));
   return action.kind === "visibility" && isVisibilitySnapshot(action.before) && isVisibilitySnapshot(action.after);
+}
+
+function hasValidPolyhedronReferences(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!value || typeof value !== "object") return false;
+  const references = value as Record<string, unknown>;
+  return [references.before, references.after].every(snapshot => {
+    if (!snapshot || typeof snapshot !== "object") return false;
+    const polyhedronDisplay = (snapshot as Record<string, unknown>).polyhedronDisplay;
+    return polyhedronDisplay === undefined || isPolyhedronDisplayState(polyhedronDisplay);
+  });
 }
 
 function isAtomColorSnapshot(value: unknown): value is Record<string, string | null> {
@@ -134,6 +152,7 @@ function isAtomColorSnapshot(value: unknown): value is Record<string, string | n
 function isVisibilitySnapshot(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   const snapshot = value as Record<string, unknown>;
+  if (snapshot.polyhedronDisplay !== undefined && !isPolyhedronDisplayState(snapshot.polyhedronDisplay)) return false;
   if (!isBooleanRecord(snapshot.atomVisibility) || !isBooleanRecord(snapshot.elementVisibility)
     || !isBooleanRecord(snapshot.componentVisibility) || !isStringArray(snapshot.hiddenBondFamilies)
     || !isStringArray(snapshot.hiddenBondRelations)) return false;

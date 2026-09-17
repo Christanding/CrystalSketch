@@ -1,6 +1,6 @@
 import { act, fireEvent, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, test } from "bun:test";
-import type { ChangeEvent } from "react";
+import { useLayoutEffect, type ChangeEvent } from "react";
 import { useStructurePreview } from "../src/app/hooks/useStructurePreview";
 import { captureSceneVisibility, restoreObjectStyleVisibility, restoreAtomColors, useSceneEdits, type SceneVisibilitySnapshot } from "../src/app/hooks/useSceneEdits";
 import { useSceneObjectInteractionController } from "../src/app/hooks/useSceneObjectInteractionController";
@@ -10,6 +10,7 @@ import { createDefaultStyle, createDefaultComponentVisibility, createDefaultComp
 import { createPreviewViewState } from "../src/app/viewState";
 import { parseVaspScene, parseVaspStructure } from "../src/api/vasp";
 import { applyModelOperation, createModelState, modelToScene, type ModelOperation } from "../src/model/structureModel";
+import { createModelPatch } from "../src/model/modelHistory";
 
 const structure = "CuI\n1\n6 0 0\n0 6 0\n0 0 6\nCu I\n1 1\nDirect\n.25 .25 .25\n.5 .5 .5";
 const originalFetch = globalThis.fetch;
@@ -442,6 +443,81 @@ test("background metadata does not rebuild visible GPU geometry", () => {
   unmount();
 });
 
+test("selected polyhedra share the visibility undo timeline without changing atom visibility or rebuilding for colors", async () => {
+  const source = parseVaspScene("Cu\n1\n1.5 0 0\n0 1.5 0\n0 0 1.5\nCu\n1\nDirect\n.5 .5 .5", {
+    "Cu|Cu": { min: .4, max: 1.6 },
+  });
+  const center = source.atoms[0]!;
+  const { result } = renderHook(() => {
+    const editing = useSceneEdits(source, 0);
+    const appearance = useFigureAppearanceController({
+      scene: editing.scene, connectivityStatus: "ready", closeActiveColorPicker() {},
+      requestConnectivity: async () => true, recordVisibilityChange: editing.recordVisibilityChange,
+    });
+    useLayoutEffect(() => editing.registerVisibilityRestore(appearance.restoreVisibilityState), [editing.registerVisibilityRestore, appearance.restoreVisibilityState]);
+    return { editing, appearance };
+  });
+  const visibleAtoms = result.current.appearance.visibleScene!.atoms;
+  await act(async () => result.current.appearance.changePolyhedronDisplay({ mode: "selected", centerAtomIds: [center.id] }));
+  const geometry = result.current.appearance.geometryScene;
+  expect(result.current.appearance.visibleScene!.atoms).toEqual(visibleAtoms);
+  expect(result.current.appearance.visibleScene!.polyhedra).toHaveLength(1);
+  act(() => result.current.appearance.setStyle(current => ({ ...current, polyhedronColors: { Cu: "#abcdef" } })));
+  expect(result.current.appearance.geometryScene).toBe(geometry);
+  act(() => result.current.appearance.hideAtom(center.siteId));
+  expect(result.current.appearance.visibleScene!.atoms).toHaveLength(0);
+  expect(result.current.appearance.visibleScene!.polyhedra).toHaveLength(1);
+  act(() => { expect(result.current.editing.undoDeletion()).toBe(true); });
+  expect(result.current.appearance.visibleScene!.atoms).toEqual(visibleAtoms);
+  act(() => { expect(result.current.editing.undoDeletion()).toBe(true); });
+  expect(result.current.appearance.polyhedronDisplay).toEqual({ mode: "auto" });
+  expect(result.current.appearance.componentVisibility.polyhedra).toBe(false);
+  act(() => { expect(result.current.editing.redoDeletion()).toBe(true); });
+  expect(result.current.appearance.visibleScene!.polyhedra).toHaveLength(1);
+  act(() => result.current.editing.deleteObjects({ atoms: new Set([center.id]), bonds: new Set() }));
+  expect(result.current.appearance.polyhedronResult).toMatchObject({ generated: 0, issues: [{ centerAtomId: center.id, reason: "missing-center", neighborCount: 0 }] });
+  act(() => { expect(result.current.editing.undoDeletion()).toBe(true); });
+  expect(result.current.appearance.polyhedronResult!.generated).toBe(1);
+});
+
+test("resetting while manual polyhedron connectivity is pending never reapplies the old center selection", async () => {
+  let finish: (success: boolean) => void = () => {};
+  const pending = new Promise<boolean>(resolve => { finish = resolve; });
+  const source = parseVaspScene(structure);
+  const { result } = renderHook(() => useFigureAppearanceController({
+    scene: source, connectivityStatus: "deferred", closeActiveColorPicker() {}, requestConnectivity: () => pending,
+  }));
+  let request: Promise<void>;
+  act(() => { request = result.current.changePolyhedronDisplay({ mode: "selected", centerAtomIds: [source.atoms[0]!.id] }); });
+  act(() => result.current.resetAppearance(source));
+  await act(async () => { finish(true); await request; });
+  expect(result.current.polyhedronDisplay).toEqual({ mode: "auto" });
+  expect(result.current.componentVisibility.polyhedra).toBe(false);
+});
+
+test("visibility undo cancels pending manual generation and retains the redo branch", async () => {
+  let finish: (success: boolean) => void = () => {};
+  const pending = new Promise<boolean>(resolve => { finish = resolve; });
+  const source = parseVaspScene(structure);
+  const { result } = renderHook(() => {
+    const editing = useSceneEdits(source, 0);
+    const appearance = useFigureAppearanceController({ scene: editing.scene, connectivityStatus: "deferred",
+      closeActiveColorPicker() {}, requestConnectivity: () => pending, recordVisibilityChange: editing.recordVisibilityChange });
+    useLayoutEffect(() => editing.registerVisibilityRestore(appearance.restoreVisibilityState), [editing.registerVisibilityRestore, appearance.restoreVisibilityState]);
+    return { editing, appearance };
+  });
+  await act(async () => result.current.appearance.handleComponentVisibilityChange("unitCell", false));
+  let request: Promise<void>;
+  act(() => { request = result.current.appearance.changePolyhedronDisplay({ mode: "selected", centerAtomIds: [source.atoms[0]!.id] }); });
+  act(() => { expect(result.current.editing.undoDeletion()).toBe(true); });
+  await act(async () => { finish(true); await request; });
+  expect(result.current.appearance.polyhedronDisplay).toEqual({ mode: "auto" });
+  expect(result.current.appearance.componentVisibility).toMatchObject({ unitCell: true, polyhedra: false });
+  expect(result.current.editing.snapshot.future).toHaveLength(1);
+  act(() => { expect(result.current.editing.redoDeletion()).toBe(true); });
+  expect(result.current.appearance.componentVisibility.unitCell).toBe(false);
+});
+
 test("round-trips bond visibility sets instead of restoring plain JSON objects", () => {
   const state: WorkspacePreferences = {
     version: 1, sessionId: "saved-work",
@@ -464,6 +540,23 @@ test("round-trips bond visibility sets instead of restoring plain JSON objects",
   expect(restored.appearance.style).toEqual(state.appearance.style);
   expect(restored.exportSettings.previewLayout).toEqual(state.exportSettings.previewLayout);
   expect(restored.exportSettings.dpi).toBe(300);
+  expect(restored.appearance.polyhedronDisplay).toBeUndefined();
+  state.appearance.polyhedronDisplay = { mode: "selected", centerAtomIds: ["Cu-0", "I-1"] };
+  const selected = parseWorkspacePreferences(serializeWorkspacePreferences(state))!;
+  expect(selected.appearance.polyhedronDisplay).toEqual(state.appearance.polyhedronDisplay);
+  for (const polyhedronDisplay of [null, {}, { mode: "other" }, { mode: "selected", centerAtomIds: [] },
+    { mode: "selected", centerAtomIds: ["Cu-0", "Cu-0"] }, { mode: "selected", centerAtomIds: [12] }]) {
+    const invalid = JSON.parse(serializeWorkspacePreferences(state));
+    invalid.appearance.polyhedronDisplay = polyhedronDisplay;
+    expect(() => parseWorkspacePreferences(JSON.stringify(invalid))).toThrow();
+  }
+  const model = createModelState(parseVaspStructure(structure));
+  const patch = createModelPatch(model, applyModelOperation(model, { type: "vacancy", siteIds: [model.structure.sites[0]!.siteId] }).state);
+  const invalidReferences = JSON.parse(serializeWorkspacePreferences(state));
+  invalidReferences.edits.history = [{ kind: "model", patch, before: { atoms: [], bonds: [] }, after: { atoms: [], bonds: [] },
+    references: { before: { measurements: [], focus: null, polyhedronDisplay: { mode: "selected", centerAtomIds: [] } },
+      after: { measurements: [], focus: null } } }];
+  expect(() => parseWorkspacePreferences(JSON.stringify(invalidReferences))).toThrow();
   const legacyDpiState = { ...state, exportSettings: { ...state.exportSettings, dpi: undefined } };
   expect(parseWorkspacePreferences(serializeWorkspacePreferences(legacyDpiState))?.exportSettings.dpi).toBe(600);
   for (const dpi of [null, "300", 150, 500, 0]) {

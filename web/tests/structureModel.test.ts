@@ -5,7 +5,7 @@ import { useLayoutEffect } from "react";
 import { useSceneEdits } from "../src/app/hooks/useSceneEdits";
 import { parseVaspScene, parseVaspStructure } from "../src/api/vasp";
 import { createPoscar, validatePoscarText } from "../src/export/poscarExport";
-import { mapModelReferences, mergeModelReferences, transitionModelReferences, type ModelReferenceSnapshot } from "../src/model/measurementModelMapping";
+import { cloneModelReferences, mapModelReferences, mergeModelReferences, transitionModelReferences, type ModelReferenceSnapshot } from "../src/model/measurementModelMapping";
 import { resolveMeasurement } from "../src/model/measurements";
 import { applyModelOperation, createModelState, inspectModelDistances, modelToScene, ModelEditError, type ModelState } from "../src/model/structureModel";
 
@@ -229,5 +229,86 @@ describe("editable periodic structure", () => {
     expect(restored.measurements[1]!.id).toBe("new");
     expect(resolveMeasurement(beforeScene, restored.measurements[1]!)).toBeNull();
     expect(beforeScene.atoms.some(atom => atom.id === restored.focus!.atomIds[0])).toBe(false);
+  });
+  test("selected polyhedron centers follow physical supercell images and undo restores the exact original IDs", () => {
+    const before = initial(), after = apply(before, { type: "supercell", repeat: [2, 1, 1] });
+    const beforeScene = modelToScene(before), afterScene = modelToScene(after);
+    const id = before.structure.sites[0]!.siteId;
+    const centerId = `${id}-image-1-0-0`;
+    const original: ModelReferenceSnapshot = { measurements: [], focus: null,
+      polyhedronDisplay: { mode: "selected", centerAtomIds: [centerId] } };
+    const cloned = cloneModelReferences(original);
+    expect(cloned).toEqual(original);
+    expect(cloned.polyhedronDisplay).not.toBe(original.polyhedronDisplay);
+    if (cloned.polyhedronDisplay?.mode !== "selected" || original.polyhedronDisplay?.mode !== "selected") throw new Error("Expected selected mode");
+    expect(cloned.polyhedronDisplay.centerAtomIds).not.toBe(original.polyhedronDisplay.centerAtomIds);
+    const mapped = mapModelReferences(original, before, after, beforeScene, afterScene);
+    if (mapped.polyhedronDisplay?.mode !== "selected") throw new Error("Expected selected mode");
+    const mappedId = mapped.polyhedronDisplay.centerAtomIds[0]!;
+    expect(mappedId).not.toBe(centerId);
+    expect(afterScene.atoms.find(atom => atom.id === mappedId)!.position)
+      .toEqual(beforeScene.atoms.find(atom => atom.id === centerId)!.position);
+    expect(afterScene.atoms.find(atom => atom.id === centerId)!.position).toEqual([16, 0, 0]);
+    expect(transitionModelReferences(mapped, after, before, afterScene, beforeScene,
+      { target: original, expected: mapped })).toEqual(original);
+  });
+  test("centering maps selected centers by the shared rigid translation and marks unavailable images missing", () => {
+    const before = initial(), after = apply(before, { type: "center", siteId: before.structure.sites[1]!.siteId });
+    const beforeScene = modelToScene(before), afterScene = modelToScene(after);
+    const id = before.structure.sites[0]!.siteId;
+    const snapshot: ModelReferenceSnapshot = { measurements: [], focus: { atomIds: [id], neighbors: false },
+      polyhedronDisplay: { mode: "selected", centerAtomIds: [id, `${id}-image-1-0-0`] } };
+    const mapped = mapModelReferences(snapshot, before, after, beforeScene, afterScene);
+    if (mapped.polyhedronDisplay?.mode !== "selected") throw new Error("Expected selected mode");
+    const mappedId = mapped.polyhedronDisplay.centerAtomIds[0]!;
+    const unavailable = mapped.polyhedronDisplay.centerAtomIds[1]!;
+    expect(mappedId).toBe(mapped.focus!.atomIds[0]!);
+    expect(afterScene.atoms.find(atom => atom.id === mappedId)!.position).toEqual([2, 2, 2]);
+    expect(afterScene.atoms.some(atom => atom.id === unavailable)).toBe(false);
+    expect(unavailable).not.toBe(`${id}-image-1-0-0`);
+    const remapped = mapModelReferences(mapped, before, after, beforeScene, afterScene);
+    expect(remapped.polyhedronDisplay).toMatchObject({ mode: "selected", centerAtomIds: [expect.any(String), unavailable] });
+  });
+  test("polyhedron references retain stable IDs for ordinary moves and vacancies, with auto and old snapshots preserved", () => {
+    const before = initial(), scene = modelToScene(before), id = before.structure.sites[0]!.siteId;
+    const selected: ModelReferenceSnapshot = { measurements: [], focus: null,
+      polyhedronDisplay: { mode: "selected", centerAtomIds: [id] } };
+    const removed = apply(before, { type: "vacancy", siteIds: [id] });
+    const moved = apply(before, { type: "move", siteId: id, coordinates: "direct", position: [.1, .1, .1] });
+    for (const after of [removed, moved]) {
+      expect(mapModelReferences(selected, before, after, scene, modelToScene(after))).toEqual(selected);
+    }
+    const automatic: ModelReferenceSnapshot = { measurements: [], focus: null, polyhedronDisplay: { mode: "auto" } };
+    const old: ModelReferenceSnapshot = { measurements: [], focus: null };
+    const supercell = apply(before, { type: "supercell", repeat: [2, 1, 1] });
+    for (const snapshot of [automatic, old]) {
+      expect(mapModelReferences(snapshot, before, supercell, scene, modelToScene(supercell))).toEqual(snapshot);
+      expect(cloneModelReferences(snapshot)).toEqual(snapshot);
+      expect(mergeModelReferences(snapshot, snapshot, snapshot)).toEqual(snapshot);
+    }
+    expect(Object.hasOwn(cloneModelReferences(old), "polyhedronDisplay")).toBe(false);
+  });
+  test("polyhedron replay preserves later center choices and automatic mode using the mapped fallback", () => {
+    const before = initial(), after = apply(before, { type: "supercell", repeat: [2, 1, 1] });
+    const beforeScene = modelToScene(before), afterScene = modelToScene(after), id = before.structure.sites[0]!.siteId;
+    const original: ModelReferenceSnapshot = { measurements: [], focus: null,
+      polyhedronDisplay: { mode: "selected", centerAtomIds: [`${id}-image-1-0-0`] } };
+    const expected = mapModelReferences(original, before, after, beforeScene, afterScene);
+    const automatic: ModelReferenceSnapshot = { ...expected, polyhedronDisplay: { mode: "auto" } };
+    expect(transitionModelReferences(automatic, after, before, afterScene, beforeScene,
+      { target: original, expected }).polyhedronDisplay).toEqual({ mode: "auto" });
+    const later: ModelReferenceSnapshot = { ...expected,
+      polyhedronDisplay: { mode: "selected", centerAtomIds: [`${id}-image-1-0-0`] } };
+    const restored = transitionModelReferences(later, after, before, afterScene, beforeScene,
+      { target: original, expected });
+    if (restored.polyhedronDisplay?.mode !== "selected") throw new Error("Expected selected mode");
+    const restoredId = restored.polyhedronDisplay.centerAtomIds[0]!;
+    expect(restoredId).not.toBe(`${id}-image-1-0-0`);
+    expect(beforeScene.atoms.some(atom => atom.id === restoredId)).toBe(false);
+    const old: ModelReferenceSnapshot = { measurements: [], focus: null };
+    const fallback: ModelReferenceSnapshot = { ...old, polyhedronDisplay: { mode: "selected", centerAtomIds: ["mapped-later"] } };
+    expect(mergeModelReferences(later, old, old, fallback).polyhedronDisplay).toEqual(fallback.polyhedronDisplay);
+    expect(mergeModelReferences(later, original, old, fallback).polyhedronDisplay).toEqual(fallback.polyhedronDisplay);
+    expect(mergeModelReferences(old, original, expected, fallback)).toEqual(old);
   });
 });

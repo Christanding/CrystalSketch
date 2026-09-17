@@ -1,4 +1,4 @@
-import type { ResolvedMeasurement } from "./measurements";
+import { MEASUREMENT_FONT_SCALE_MIN, MEASUREMENT_FONT_SCALE_MAX, type ResolvedMeasurement } from "./measurements";
 
 type Point3 = readonly [number, number, number];
 type Point2 = { x: number; y: number };
@@ -10,7 +10,7 @@ export const MEASUREMENT_LABEL_CENTER: [number, number] = [0.5, 0.08];
 
 export function measurementLabelSize(label: string, span: number, fontScale = 100) {
   const canvasWidth = Math.min(512, Math.max(96, label.length * LABEL_FONT_SIZE + 32));
-  const fontPercent = Number.isFinite(fontScale) ? Math.min(250, Math.max(50, fontScale)) : 100;
+  const fontPercent = Number.isFinite(fontScale) ? Math.min(MEASUREMENT_FONT_SCALE_MAX, Math.max(MEASUREMENT_FONT_SCALE_MIN, fontScale)) : 100;
   const height = safeSpan(span) * 0.042 * fontPercent / 100;
   return { canvasWidth, height, width: height * canvasWidth / LABEL_CANVAS_HEIGHT };
 }

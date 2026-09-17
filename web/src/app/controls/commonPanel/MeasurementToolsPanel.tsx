@@ -9,7 +9,7 @@ import { HexColorPicker } from "../HexColorPicker";
 import { PercentSliderRow } from "./sharedControls";
 import { atomSiteIndex } from "../../atomInspector";
 import type { AtomSpec } from "../../../api/scene";
-import { measurementIsDisplayed, type MeasurementDisplayMode } from "../../../model/measurements";
+import { measurementIsDisplayed, MEASUREMENT_FONT_SCALE_MIN, MEASUREMENT_FONT_SCALE_MAX, type MeasurementDisplayMode } from "../../../model/measurements";
 import type { MeasurementTool, MeasurementToolsController } from "../../hooks/useMeasurementTools";
 
 function atomLabel(atom: AtomSpec) {
@@ -80,7 +80,7 @@ export function MeasurementToolsPanel({ tools, visibleAtomIds }: { tools: Measur
           onValueChange={color => tools.setLabelStyle(current => ({ ...current, color }))} />
       </div>
       <PercentSliderRow accessibleLabel={t("measurement.fontScale")} label={t("measurement.fontScale")}
-        valueLabel={t("measurement.scale")} min={50} max={250} value={tools.labelStyle.fontScale}
+        valueLabel={t("measurement.scale")} min={MEASUREMENT_FONT_SCALE_MIN} max={MEASUREMENT_FONT_SCALE_MAX} value={tools.labelStyle.fontScale}
         onValueChange={fontScale => tools.setLabelStyle(current => ({ ...current, fontScale }))} />
       <div className="flex items-center justify-between gap-2 px-1.5">
         <span>{t("measurement.fontWeight")}</span>

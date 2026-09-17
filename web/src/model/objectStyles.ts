@@ -441,7 +441,7 @@ export function visibleSceneForObjectStyles(
     ...scene,
     atoms,
     bonds: scene.bonds.flatMap((bond) => remapBond(bond, atomIndexMap)),
-    polyhedra: scene.polyhedra.flatMap((polyhedron) =>
+    polyhedra: scene.polyhedronAtoms ? scene.polyhedra : scene.polyhedra.flatMap((polyhedron) =>
       remapPolyhedron(polyhedron, atomIndexMap),
     ),
   };

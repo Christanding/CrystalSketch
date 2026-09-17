@@ -14,7 +14,19 @@ export function applySceneDeletions(scene: SceneSpec | null, deleted: SceneSelec
   const bonds = scene.bonds.filter(bond => !deleted.bonds.has(bond.id)
     && indices.has(bond.startAtomIndex) && indices.has(bond.endAtomIndex))
     .map(bond => ({ ...bond, startAtomIndex: indices.get(bond.startAtomIndex)!, endAtomIndex: indices.get(bond.endAtomIndex)! }));
-  const polyhedra = scene.polyhedra.filter(polyhedron => indices.has(polyhedron.centerAtomIndex)
+  const polyhedronAtoms = scene.polyhedronAtoms;
+  const sourceIndicesById = polyhedronAtoms
+    ? new Map(scene.atoms.map((atom, index) => [atom.id, index])) : null;
+  const polyhedra = polyhedronAtoms ? scene.polyhedra.filter(polyhedron => {
+    const center = polyhedronAtoms[polyhedron.centerAtomIndex];
+    if (!center || deleted.atoms.has(center.id)) return false;
+    const sourceCenterIndex = sourceIndicesById!.get(center.id);
+    return polyhedron.hullAtomIndices.every(index => {
+      const atom = polyhedronAtoms[index];
+      return atom && !deleted.atoms.has(atom.id)
+        && !removedCoordination.has(`${sourceCenterIndex}|${sourceIndicesById!.get(atom.id)}`);
+    });
+  }) : scene.polyhedra.filter(polyhedron => indices.has(polyhedron.centerAtomIndex)
     && polyhedron.hullAtomIndices.every(index => indices.has(index)
       && !removedCoordination.has(`${polyhedron.centerAtomIndex}|${index}`)))
     .map(polyhedron => ({ ...polyhedron, centerAtomIndex: indices.get(polyhedron.centerAtomIndex)!,

@@ -13,6 +13,10 @@ import {
   currentFigureExportMargins,
   defaultFigureExportLayout,
   layoutCombinedExport,
+  figureExportLayerOffset,
+  withFigureExportLayerOffset,
+  structureOnlyFigureExportLayout,
+  type MovableFigureLayerId,
 } from "../../../export/combinedExportRaster";
 import { assertExportCanvasSize, exportBackgroundColor } from "../../../export/rasterCanvas";
 import type { RasterExportBounds } from "../../../scene/exportRenderer";
@@ -50,22 +54,23 @@ export function FigurePreviewDialog({ open, loading, error, content, layout, exp
           </div>
         </div> : error ? <p role="alert" className="py-8 text-sm text-destructive">{error}</p> : content?.kind === "combined" ? (
           <CombinedPreview content={content} layout={layout} onLayoutChange={onLayoutChange} />
-        ) : content?.kind === "separate" ? <SeparatePreview content={content} /> : null}
+        ) : content?.kind === "separate" ? <SeparatePreview content={content} layout={layout} onLayoutChange={onLayoutChange} /> : null}
       </DialogContent>
     </Dialog>
   );
 }
 
-function CombinedPreview({ content, layout, onLayoutChange }: {
+function CombinedPreview({ content, layout, onLayoutChange, structureOnly = false }: {
   content: Extract<FigurePreviewContent, { kind: "combined" }>;
   layout?: FigureExportLayout;
   onLayoutChange: (layout: FigureExportLayout | undefined) => void;
+  structureOnly?: boolean;
 }) {
   const { t } = useTranslation();
   const { prepared, settings } = content;
   const hostRef = useRef<HTMLDivElement>(null);
   const boardRef = useRef<HTMLDivElement>(null);
-  const dragRef = useRef<{ id: "legend" | "crystalAxes"; x: number; y: number; scale: number; layout: FigureExportLayout } | null>(null);
+  const dragRef = useRef<{ id: MovableFigureLayerId; pointerId: number; x: number; y: number; scale: number; layout: FigureExportLayout } | null>(null);
   const [hostSize, setHostSize] = useState({ width: 640, height: 480 });
   const [dragBounds, setDragBounds] = useState<RasterExportBounds | null>(null);
   const [layoutError, setLayoutError] = useState(false);
@@ -97,14 +102,16 @@ function CombinedPreview({ content, layout, onLayoutChange }: {
     }
   }
 
-  function startDrag(event: PointerEvent<HTMLButtonElement>, id: "legend" | "crystalAxes") {
+  function startDrag(event: PointerEvent<HTMLButtonElement>, id: MovableFigureLayerId) {
     if (event.button !== 0) return;
     event.preventDefault();
-    event.currentTarget.setPointerCapture(event.pointerId);
     const board = boardRef.current;
     if (!board) return;
-    dragRef.current = { id, x: event.clientX, y: event.clientY,
-      scale: board.getBoundingClientRect().width / rendered.bounds.width,
+    const scale = board.getBoundingClientRect().width / rendered.bounds.width;
+    if (!Number.isFinite(scale) || scale <= 0) return;
+    event.currentTarget.focus({ preventScroll: true });
+    event.currentTarget.setPointerCapture(event.pointerId);
+    dragRef.current = { id, pointerId: event.pointerId, x: event.clientX, y: event.clientY, scale,
       layout: layout ?? defaultFigureExportLayout() };
     // Hold framing while dragging so automatic tight bounds cannot move the target.
     setDragBounds(rendered.bounds);
@@ -112,15 +119,16 @@ function CombinedPreview({ content, layout, onLayoutChange }: {
 
   function moveDrag(event: PointerEvent<HTMLButtonElement>) {
     const drag = dragRef.current;
-    if (!drag) return;
-    const origin = drag.layout[drag.id];
-    commitLayout({ ...drag.layout, [drag.id]: {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    const origin = figureExportLayerOffset(drag.layout, drag.id);
+    commitLayout(withFigureExportLayerOffset(drag.layout, drag.id, {
       x: origin.x + (event.clientX - drag.x) / drag.scale / prepared.width,
       y: origin.y + (event.clientY - drag.y) / drag.scale / prepared.height,
-    } });
+    }));
   }
 
-  function finishDrag() {
+  function finishDrag(event: PointerEvent<HTMLButtonElement>) {
+    if (dragRef.current && event.pointerId !== dragRef.current.pointerId) return;
     dragRef.current = null;
     setDragBounds(null);
   }
@@ -136,12 +144,16 @@ function CombinedPreview({ content, layout, onLayoutChange }: {
             position: "absolute", left: (layer.x - displayBounds.minX) * scale, top: (layer.y - displayBounds.minY) * scale,
             width: layer.image.width * scale, height: layer.image.height * scale,
           };
-          const movable = layer.id === "legend" || layer.id === "crystalAxes" ? layer.id : null;
+          const movable: MovableFigureLayerId | null = layer.id && layer.id !== "structure" ? layer.id : null;
+          const isMeasurement = movable?.startsWith("measurement:");
           return <div key={layer.id ?? index} style={position}>
             {urls[index] ? <img src={urls[index]} alt="" draggable={false} className="pointer-events-none size-full select-none" /> : null}
             {movable ? <button type="button"
-              aria-label={t("figurePreview.moveComponent", { component: componentLabel(movable) })}
+              aria-label={isMeasurement ? t("figurePreview.moveMeasurement", { label: layer.label ?? "" })
+                : t("figurePreview.moveComponent", { component: componentLabel(movable as "legend" | "crystalAxes") })}
               data-preview-component={movable}
+              style={isMeasurement ? { inset: "auto", left: "50%", top: "50%", transform: "translate(-50%, -50%)",
+                width: "100%", height: "100%", minWidth: 24, minHeight: 24 } : undefined}
               className="absolute inset-0 touch-none cursor-grab rounded-sm border border-dashed border-sky-600/55 bg-transparent outline-none hover:border-sky-600 focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
               onPointerDown={event => startDrag(event, movable)} onPointerMove={moveDrag}
               onPointerUp={finishDrag} onPointerCancel={finishDrag} onLostPointerCapture={finishDrag}
@@ -149,17 +161,21 @@ function CombinedPreview({ content, layout, onLayoutChange }: {
                 const steps = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
                 if (!steps) return;
                 event.preventDefault();
-                const current = layout ?? defaultFigureExportLayout();
+                const current = figureExportLayerOffset(layout, movable);
                 const amount = event.shiftKey ? 10 : 1;
-                commitLayout({ ...current, [movable]: { x: current[movable].x + steps[0]! * amount / prepared.width,
-                  y: current[movable].y + steps[1]! * amount / prepared.height } });
+                commitLayout(withFigureExportLayerOffset(layout, movable, {
+                  x: current.x + steps[0]! * amount / prepared.width,
+                  y: current.y + steps[1]! * amount / prepared.height,
+                }));
               }} /> : null}
           </div>;
         })}
       </div>
     </div>
+    {prepared.layers.some(layer => layer.id?.startsWith("measurement:")) ?
+      <p className="text-xs text-muted-foreground">{t("figurePreview.dragLabelsHint")}</p> : null}
     <div className="flex flex-wrap items-center justify-between gap-3">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
+      {!structureOnly ? <div className="flex flex-wrap items-center gap-2 text-sm">
         <span className="text-muted-foreground">{t("figurePreview.margins")}</span>
         {(["top", "right", "bottom", "left"] as const).map(side => <label key={side} className="flex items-center gap-1.5">
           <span>{t(`figurePreview.${side}`)}</span>
@@ -173,31 +189,43 @@ function CombinedPreview({ content, layout, onLayoutChange }: {
               commitLayout({ ...(layout ?? defaultFigureExportLayout()), margins: { ...margins, [side]: Math.max(0, value) / 100 } });
             }} />
         </label>)}
-      </div>
+      </div> : null}
       <div className="flex items-center gap-3">
         <span className="text-xs text-muted-foreground">{rendered.bounds.width} × {rendered.bounds.height} px</span>
-        <Button size="sm" variant="outline" onClick={() => commitLayout(undefined)}><RotateCcw className="size-3.5" />{t("figurePreview.reset")}</Button>
+        <Button size="sm" variant="outline" onClick={() => commitLayout(undefined)}><RotateCcw className="size-3.5" />{t(structureOnly ? "figurePreview.resetLabels" : "figurePreview.reset")}</Button>
       </div>
     </div>
     {layoutError ? <p className="text-sm text-destructive" role="alert">{t("figurePreview.tooLarge")}</p> : null}
   </>;
 }
 
-function SeparatePreview({ content }: { content: Extract<FigurePreviewContent, { kind: "separate" }> }) {
+function SeparatePreview({ content, layout, onLayoutChange }: {
+  content: Extract<FigurePreviewContent, { kind: "separate" }>;
+  layout?: FigureExportLayout;
+  onLayoutChange: (layout: FigureExportLayout | undefined) => void;
+}) {
   const { t } = useTranslation();
   const [active, setActive] = useState(0);
   const blobs = useMemo(() => content.files.map(file => file.blob), [content]);
   const urls = useBlobUrls(blobs);
-  const file = content.files[active];
+  const structure = content.structure;
+  const isStructure = Boolean(structure && active === 0);
+  const fileIndex = active - (structure ? 1 : 0);
+  const file = content.files[fileIndex];
+  const names = [...(structure ? [structure.fileName] : []), ...content.files.map(item => item.fileName)];
   return <>
-    {content.files.length > 1 ? <div className="flex flex-wrap gap-1" role="group" aria-label={t("figurePreview.files")}>
-      {content.files.map((item, index) => <Button key={item.fileName} size="sm" variant={index === active ? "secondary" : "ghost"}
-        aria-pressed={index === active} onClick={() => setActive(index)}>{item.fileName}</Button>)}
+    {names.length > 1 ? <div className="flex flex-wrap gap-1" role="group" aria-label={t("figurePreview.files")}>
+      {names.map((name, index) => <Button key={name} size="sm" variant={index === active ? "secondary" : "ghost"}
+        aria-pressed={index === active} onClick={() => setActive(index)}>{name}</Button>)}
     </div> : null}
-    <div className="flex h-[60dvh] min-h-52 items-center justify-center overflow-auto rounded-md border p-3" style={CHECKERBOARD_STYLE}>
-      {file && urls[active] ? file.format === "pdf" ? <iframe title={file.fileName} src={urls[active]} className="size-full border-0" />
-        : <img src={urls[active]} alt={file.fileName} className="max-h-full max-w-full object-contain" /> : null}
-    </div>
+    {isStructure && structure ? <CombinedPreview content={{ kind: "combined", prepared: structure.prepared, settings: structure.settings }}
+      structureOnly layout={structureOnlyFigureExportLayout(layout)} onLayoutChange={next => {
+        const { measurementLabels: _old, ...accessories } = layout ?? defaultFigureExportLayout();
+        onLayoutChange(next?.measurementLabels ? { ...accessories, measurementLabels: next.measurementLabels } : accessories);
+      }} /> : <div className="flex h-[60dvh] min-h-52 items-center justify-center overflow-auto rounded-md border p-3" style={CHECKERBOARD_STYLE}>
+      {file && urls[fileIndex] ? file.format === "pdf" ? <iframe title={file.fileName} src={urls[fileIndex]} className="size-full border-0" />
+        : <img src={urls[fileIndex]} alt={file.fileName} className="max-h-full max-w-full object-contain" /> : null}
+    </div>}
     <p className="text-xs text-muted-foreground">{t("figurePreview.separateHint")}</p>
   </>;
 }

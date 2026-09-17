@@ -24,17 +24,27 @@ export interface FigureExportLayout {
   // Offsets follow the structure canvas size when export dimensions change.
   legend: { x: number; y: number };
   crystalAxes: { x: number; y: number };
+  measurementLabels?: Record<string, { x: number; y: number }>;
   // Fractions of the shorter canvas side, measured from visible content.
   margins?: { top: number; right: number; bottom: number; left: number };
 }
 
 export function isFigureExportLayout(value: unknown): value is FigureExportLayout {
-  if (!value || typeof value !== "object") return false;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const layout = value as Partial<FigureExportLayout>;
-  if (![layout.legend, layout.crystalAxes].every(offset => offset && Number.isFinite(offset.x) && Number.isFinite(offset.y))) return false;
+  if (![layout.legend, layout.crystalAxes].every(isFigureLayerOffset)) return false;
+  const labels = layout.measurementLabels;
+  if (labels !== undefined && (!labels || typeof labels !== "object" || Array.isArray(labels)
+    || !Object.entries(labels).every(([id, offset]) => id.trim().length > 0 && isFigureLayerOffset(offset)))) return false;
   const margins = layout.margins;
-  return margins === undefined || Boolean(margins && [margins.top, margins.right, margins.bottom, margins.left]
+  return margins === undefined || Boolean(margins && typeof margins === "object" && !Array.isArray(margins)
+    && [margins.top, margins.right, margins.bottom, margins.left]
     .every(side => Number.isFinite(side) && side >= 0));
+}
+
+function isFigureLayerOffset(value: unknown): value is { x: number; y: number } {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && "x" in value && "y" in value && Number.isFinite(value.x) && Number.isFinite(value.y));
 }
 
 export interface ExportSettingsState {

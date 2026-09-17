@@ -14,31 +14,55 @@ export function buildVaspPolyhedra(atoms: AtomSpec[], bonds: BondSpec[], sourceC
   const polyhedra: PolyhedronSpec[] = [];
   neighbors.forEach((neighborIndices, centerAtomIndex) => {
     if (neighborIndices.size < 4) return;
-    const center = atoms[centerAtomIndex]!;
-    const centerX = PAULING[center.element];
-    // Retain upstream's center selection: lower electronegativity, then symbol order.
-    if (centerX === undefined || [...neighborIndices].some(index => {
-      const element = atoms[index]!.element;
-      const neighborX = PAULING[element];
-      return neighborX === undefined || neighborX < centerX
-        || (neighborX === centerX && element <= center.element);
-    })) return;
-
-    const hullAtomIndices = [centerAtomIndex, ...neighborIndices];
-    const origin = new Vector3(...center.position);
-    const points = hullAtomIndices.map(index => new Vector3(...atoms[index]!.position).sub(origin));
-    if (!hasVolume(points)) return;
-    const hull = new ConvexHull().setFromPoints(points);
-    const indices = new Map(points.map((point, index) => [point, index]));
-    const faces: PolyhedronSpec["faces"] = hull.faces.map(face => {
-      const edge = face.edge;
-      return [indices.get(edge.head().point)!, indices.get(edge.next.head().point)!, indices.get(edge.next.next.head().point)!];
-    });
+    if (!isAutomaticPolyhedronCenter(atoms, centerAtomIndex, neighborIndices)) return;
+    const polyhedron = buildCoordinationPolyhedron(atoms, centerAtomIndex, neighborIndices);
+    if (!polyhedron) return;
     if (polyhedra.length >= 25_600) throw new Error("配位多面体超过 25,600 个的预览上限");
-    polyhedra.push({ centerAtomIndex, hullAtomIndices, faces,
-      visibilityDependencies: [], visibilityDependencyGroups: [] });
+    polyhedra.push(polyhedron);
   });
   return polyhedra;
+}
+
+export function isAutomaticPolyhedronCenter(
+  atoms: readonly AtomSpec[],
+  centerAtomIndex: number,
+  neighborIndices: Iterable<number>,
+): boolean {
+  const center = atoms[centerAtomIndex];
+  if (!center) return false;
+  const centerX = PAULING[center.element];
+  // Retain upstream's center selection: lower electronegativity, then symbol order.
+  return centerX !== undefined && ![...neighborIndices].some(index => {
+    const element = atoms[index]?.element;
+    if (element === undefined) return true;
+    const neighborX = PAULING[element];
+    return neighborX === undefined || neighborX < centerX
+      || (neighborX === centerX && element <= center.element);
+  });
+}
+
+/** Build one hull from an existing bond graph, without the automatic species filter. */
+export function buildCoordinationPolyhedron(
+  atoms: readonly AtomSpec[],
+  centerAtomIndex: number,
+  neighborIndices: Iterable<number>,
+): PolyhedronSpec | null {
+  const neighbors = new Set(neighborIndices);
+  neighbors.delete(centerAtomIndex);
+  if (neighbors.size < 4) return null;
+  const hullAtomIndices = [centerAtomIndex, ...neighbors];
+  if (hullAtomIndices.some(index => !atoms[index]?.position.every(Number.isFinite))) return null;
+  const origin = new Vector3(...atoms[centerAtomIndex]!.position);
+  const points = hullAtomIndices.map(index => new Vector3(...atoms[index]!.position).sub(origin));
+  if (!hasVolume(points)) return null;
+  const hull = new ConvexHull().setFromPoints(points);
+  const indices = new Map(points.map((point, index) => [point, index]));
+  const faces: PolyhedronSpec["faces"] = hull.faces.map(face => {
+    const edge = face.edge;
+    return [indices.get(edge.head().point)!, indices.get(edge.next.head().point)!, indices.get(edge.next.next.head().point)!];
+  });
+  return { centerAtomIndex, hullAtomIndices, faces,
+    visibilityDependencies: [], visibilityDependencyGroups: [] };
 }
 
 function hasVolume(points: Vector3[]): boolean {

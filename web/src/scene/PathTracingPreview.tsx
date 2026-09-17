@@ -37,7 +37,8 @@ export default function PathTracingPreview(props: PreviewProps) {
     props.style.atomRadius, props.style.atomRadiusModel, props.style.bondThickness, props.style.bondColor,
     props.style.bondColorMode, props.style.colorScheme, props.style.colorSchemeMode, props.style.customColormap,
     props.style.distinguishSimilarColors, props.style.polyhedronColors, props.style.objectStyles]);
-  const geometryScene = useMemo(() => props.scene, [props.scene.atoms, props.scene.bonds, props.scene.polyhedra, props.scene.cell]);
+  const geometryScene = useMemo(() => props.scene, [props.scene.atoms, props.scene.bonds,
+    props.scene.polyhedra, props.scene.polyhedronAtoms, props.scene.cell]);
   const traceable = isPhysicalMaterialPreset(props.style.materialPreset);
 
   useEffect(() => {

@@ -323,6 +323,14 @@ function measurementFontsReady(fontWeight: number): boolean {
 }
 
 function createLabelTexture(label: string, color: string, fontWeight: number): CanvasTexture {
+  const texture = new CanvasTexture(createMeasurementLabelCanvas(label, color, fontWeight));
+  texture.colorSpace = SRGBColorSpace;
+  texture.magFilter = LinearFilter;
+  return texture;
+}
+
+/** Share the exact glyph canvas between viewport sprites and movable export labels. */
+export function createMeasurementLabelCanvas(label: string, color: string, fontWeight: number): HTMLCanvasElement {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   canvas.height = LABEL_CANVAS_HEIGHT;
@@ -335,8 +343,5 @@ function createLabelTexture(label: string, color: string, fontWeight: number): C
     context.fillStyle = color;
     context.fillText(label, canvas.width / 2, canvas.height / 2 + 3, canvas.width - 24);
   }
-  const texture = new CanvasTexture(canvas);
-  texture.colorSpace = SRGBColorSpace;
-  texture.magFilter = LinearFilter;
-  return texture;
+  return canvas;
 }

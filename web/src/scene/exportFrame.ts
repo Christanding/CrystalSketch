@@ -217,13 +217,14 @@ export function computeStructureProjectedBounds({
   }
 
   if (componentOpacity.polyhedra > 0) {
+    const polyhedronAtoms = scene.polyhedronAtoms ?? scene.atoms;
     for (const polyhedron of scene.polyhedra) {
       if (polyhedron.faces.length === 0) {
         continue;
       }
 
       for (const atomIndex of polyhedron.hullAtomIndices) {
-        const atom = scene.atoms[atomIndex];
+        const atom = polyhedronAtoms[atomIndex];
         if (atom) {
           bounds.includePoint(projector.projectPoint(atom.position));
         }

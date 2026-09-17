@@ -236,6 +236,18 @@ describe("measurement state and export integration", () => {
       },
     };
     expect(parseWorkspacePreferences(serializeWorkspacePreferences(state))!.measurementTools).toEqual(state.measurementTools);
+    state.measurementTools!.appearance!.fontScale = 25;
+    expect(parseWorkspacePreferences(serializeWorkspacePreferences(state))!.measurementTools!.appearance!.fontScale).toBe(25);
+    state.measurementTools!.appearance!.fontScale = 24;
+    expect(() => parseWorkspacePreferences(serializeWorkspacePreferences(state))).toThrow();
+    state.measurementTools!.appearance!.fontScale = 250;
+    expect(parseWorkspacePreferences(serializeWorkspacePreferences(state))!.measurementTools!.appearance!.fontScale).toBe(250);
+    state.exportSettings.previewLayout = { legend: { x: 0, y: 0 }, crystalAxes: { x: 0, y: 0 },
+      measurementLabels: { "image-measurement": { x: .15, y: -.2 } } };
+    expect(parseWorkspacePreferences(serializeWorkspacePreferences(state))!.exportSettings.previewLayout).toEqual(state.exportSettings.previewLayout);
+    const invalidOffsets = JSON.parse(serializeWorkspacePreferences(state));
+    invalidOffsets.exportSettings.previewLayout.measurementLabels["image-measurement"].x = null;
+    expect(() => parseWorkspacePreferences(JSON.stringify(invalidOffsets))).toThrow();
     expect(parseWorkspacePreferences(serializeWorkspacePreferences({ ...state, measurementTools: undefined }))!.measurementTools).toBeUndefined();
   });
 

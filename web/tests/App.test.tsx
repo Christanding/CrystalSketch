@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { Quaternion, Vector3 } from "three";
 
 import type { AtomSpec, SceneSpec } from "../src/api/scene";
+import { parseVaspScene } from "../src/api/vasp";
 import type {
   CreateFigureExportOptions,
   FigureExportFile,
@@ -1732,6 +1733,84 @@ describe("App", () => {
     await user.click(within(controls).getByRole("button", { name: "Reset polyhedron colors" }));
     expect(within(controls).getByRole("button", { name: "Set Na polyhedron color" }).innerHTML).toBe(originalSwatch);
     expect(screen.getByRole("button", { name: "Set Na color" }).innerHTML).toBe(atomColor);
+  });
+
+  test("explains a gray automatic control and generates one selected center without adding hidden spheres to exports", async () => {
+    const user = userEvent.setup();
+    const scene = parseVaspScene("Cu\n1\n1.5 0 0\n0 1.5 0\n0 0 1.5\nCu\n1\nDirect\n.5 .5 .5", {
+      "Cu|Cu": { min: .4, max: 1.6 },
+    });
+    await renderLoadedStructure(user, scene);
+    const controls = screen.getByRole("complementary", { name: "Common controls" });
+    const polyhedra = () => within(controls).getByRole("checkbox", { name: "Polyhedra" }) as HTMLButtonElement;
+    expect(polyhedra().disabled).toBe(true);
+    expect(screen.getByText("Automatic element rules exclude these centers. Select atoms to generate manually.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Use selected atoms" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(within(controls).getByRole("tab", { name: "Measure" }));
+    await user.type(screen.getByRole("textbox", { name: "Atom number" }), "1");
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await user.click(screen.getByRole("button", { name: "Cu #1" }));
+    await user.click(within(controls).getByRole("tab", { name: "Display" }));
+    const requestsBeforeGeneration = fetchCalls.length;
+    await user.click(screen.getByRole("button", { name: "Use selected atoms" }));
+    expect(polyhedra().disabled).toBe(false);
+    expect(polyhedra().getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Centers: 1 · Polyhedra generated: 1")).toBeTruthy();
+    expect(within(controls).getByRole("checkbox", { name: "Atoms" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(controls).getByRole("switch", { name: "One-hop bonded atoms" }).getAttribute("aria-checked")).toBe("false");
+    await user.click(within(controls).getByRole("tab", { name: "Export" }));
+    await user.click(within(controls).getByRole("button", { name: "Export PNG" }));
+    await waitFor(() => expect(exportRequests).toHaveLength(1));
+    expect(exportRequests[0]!.scene.polyhedra).toHaveLength(1);
+    expect(exportRequests[0]!.visibleSceneOverride!.atoms).toHaveLength(1);
+    expect(exportRequests[0]!.visibleSceneOverride!.polyhedra).toHaveLength(1);
+    expect(exportRequests[0]!.visibleSceneOverride!.polyhedronAtoms).toHaveLength(7);
+    await user.click(within(controls).getByRole("tab", { name: "Display" }));
+    await user.click(screen.getByRole("button", { name: "Automatic all" }));
+    expect(polyhedra().disabled).toBe(true);
+    fireEvent.keyDown(window, { key: "z", ctrlKey: true });
+    expect(polyhedra().disabled).toBe(false);
+    expect(screen.getByRole("button", { name: "Use selected atoms" }).getAttribute("aria-pressed")).toBe("true");
+    expect(fetchCalls).toHaveLength(requestsBeforeGeneration);
+  });
+
+  test("accepts 25 percent measurement text in both controls and the export scene", async () => {
+    const user = userEvent.setup();
+    await renderLoadedStructure(user);
+    const controls = screen.getByRole("complementary", { name: "Common controls" });
+    await user.click(within(controls).getByRole("tab", { name: "Measure" }));
+    const slider = screen.getByRole("slider", { name: "Text size scale" }) as HTMLInputElement;
+    const input = screen.getByRole("textbox", { name: "Text size scale value" }) as HTMLInputElement;
+    expect(slider.min).toBe("25");
+    expect(slider.max).toBe("250");
+    expect(input.value).toBe("100");
+    await user.clear(input);
+    await user.type(input, "25%{Enter}");
+    expect(input.value).toBe("25");
+    expect(slider.value).toBe("25");
+    await user.click(within(controls).getByRole("tab", { name: "Export" }));
+    await user.click(within(controls).getByRole("button", { name: "Export PNG" }));
+    await waitFor(() => expect(exportRequests).toHaveLength(1));
+    expect(exportRequests[0]!.scene.measurementStyle!.fontScale).toBe(25);
+    expect(exportRequests[0]!.visibleSceneOverride!.measurementStyle!.fontScale).toBe(25);
+  });
+
+  test("reports the actual selected center's deficient coordination instead of enabling an empty checkbox", async () => {
+    const user = userEvent.setup();
+    const scene = parseVaspScene("CuI\n1\n10 0 0\n0 10 0\n0 0 10\nCu I\n1 1\nDirect\n.4 .5 .5\n.6 .5 .5");
+    await renderLoadedStructure(user, scene);
+    const controls = screen.getByRole("complementary", { name: "Common controls" });
+    await user.click(within(controls).getByRole("tab", { name: "Measure" }));
+    await user.type(screen.getByRole("textbox", { name: "Atom number" }), "1");
+    await user.click(screen.getByRole("button", { name: "Find" }));
+    await user.click(screen.getByRole("button", { name: "Cu #1" }));
+    await user.click(within(controls).getByRole("tab", { name: "Display" }));
+    const requestsBeforeGeneration = fetchCalls.length;
+    await user.click(screen.getByRole("button", { name: "Use selected atoms" }));
+    expect(screen.getByText(/neighbor count is 1; at least four are required/)).toBeTruthy();
+    expect((within(controls).getByRole("checkbox", { name: "Polyhedra" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("Centers: 1 · Polyhedra generated: 0")).toBeTruthy();
+    expect(fetchCalls).toHaveLength(requestsBeforeGeneration);
   });
 
   test("toggles polyhedra and unit cell boundary independently and preserves visibility in both export modes", async () => {

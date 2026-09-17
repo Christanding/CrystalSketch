@@ -3,6 +3,7 @@ import type { SceneSpec } from "../../api/scene";
 import type { BondVisibilityOverrides } from "../../model/bondObjects";
 import type { ComponentVisibilityState } from "../../model/displayState";
 import type { ObjectStyleState } from "../../model/objectStyles";
+import type { PolyhedronDisplayState } from "../../model/polyhedronDisplay";
 import { applySceneDeletions } from "../../model/sceneEdits";
 import { EMPTY_SELECTION, type SceneSelection } from "../../selection/SceneSelection";
 import { applyModelOperation, type ModelState } from "../../model/structureModel";
@@ -16,6 +17,7 @@ export interface SceneVisibilitySnapshot {
   componentVisibility: ComponentVisibilityState;
   hiddenBondFamilies: string[];
   hiddenBondRelations: string[];
+  polyhedronDisplay?: PolyhedronDisplayState;
 }
 export type AtomColorSnapshot = Record<string, string | null>;
 type AtomColorAction = { kind: "atom-color"; before: AtomColorSnapshot; after: AtomColorSnapshot };
@@ -209,12 +211,14 @@ export function restoreAtomColors(current: ObjectStyleState, snapshot: AtomColor
 
 export function captureSceneVisibility(
   objectStyles: ObjectStyleState, componentVisibility: ComponentVisibilityState, bondVisibility: BondVisibilityOverrides,
+  polyhedronDisplay?: PolyhedronDisplayState,
 ): SceneVisibilitySnapshot {
   return copyVisibility({
     atomVisibility: visibilityProperties(objectStyles.atomOverrides),
     elementVisibility: visibilityProperties(objectStyles.elementOverrides),
     componentVisibility,
     hiddenBondFamilies: [...bondVisibility.hiddenFamilies], hiddenBondRelations: [...bondVisibility.hiddenBondRelations],
+    ...(polyhedronDisplay?.mode === "selected" ? { polyhedronDisplay } : {}),
   });
 }
 
@@ -249,6 +253,9 @@ function copyVisibility(snapshot: SceneVisibilitySnapshot): SceneVisibilitySnaps
     componentVisibility: { ...snapshot.componentVisibility },
     hiddenBondFamilies: [...new Set(snapshot.hiddenBondFamilies)].sort(),
     hiddenBondRelations: [...new Set(snapshot.hiddenBondRelations)].sort(),
+    ...(snapshot.polyhedronDisplay?.mode === "selected" ? {
+      polyhedronDisplay: { mode: "selected" as const, centerAtomIds: [...snapshot.polyhedronDisplay.centerAtomIds] },
+    } : {}),
   };
 }
 

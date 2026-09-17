@@ -33,6 +33,7 @@ import {
 import { useCommittedInput } from "../useCommittedInput";
 import { HexColorPicker } from "../HexColorPicker";
 import { TOOL_ICON_BUTTON_FEEDBACK_ANIMATION_MS } from "./controlFeedback";
+import { PolyhedronControls, type PolyhedronControlModel } from "./PolyhedronControls";
 import {
   clampOpacityValue,
   formatOpacityValue,
@@ -51,6 +52,7 @@ export function DisplayTabContent({
   connectivityStatus,
   hasPolyhedra,
   polyhedronElements,
+  polyhedronControls,
   style,
   onStyleChange,
   onOpacityChange,
@@ -63,6 +65,7 @@ export function DisplayTabContent({
   connectivityStatus: "deferred" | "loading" | "ready" | "error";
   hasPolyhedra: boolean;
   polyhedronElements: string[];
+  polyhedronControls: PolyhedronControlModel;
   style: StyleState;
   onStyleChange: Dispatch<SetStateAction<StyleState>>;
   onOpacityChange: (key: keyof ComponentOpacityState, value: number) => void;
@@ -184,6 +187,8 @@ export function DisplayTabContent({
             onOpacityChange={(value) => setOpacity("polyhedra", value)}
             loading={connectivityStatus === "loading" && connectivityIntent === "polyhedra"}
           />
+          <PolyhedronControls model={polyhedronControls} connectivityStatus={connectivityStatus}
+            enabled={visibility.polyhedra} opacity={opacity.polyhedra} />
           {hasPolyhedra ? (
             <div className="flex min-h-7 items-center justify-between gap-2 px-1.5 text-[13px]">
               <span className="shrink-0 text-muted-foreground">{t("display.polyhedronColors")}</span>

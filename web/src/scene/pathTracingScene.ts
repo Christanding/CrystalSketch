@@ -231,6 +231,7 @@ export async function createCrystalPathTraceScene(
 
     const polyhedronOpacity = componentOpacity.polyhedra / 100;
     if (polyhedronOpacity > 0) {
+      const polyhedronAtoms = source.polyhedronAtoms ?? source.atoms;
       const seenFaces = new Set<string>();
       const seenEdges = new Set<string>();
       const edgeOpacity = Math.min(1, Math.sqrt(polyhedronOpacity / 0.4) * 0.95);
@@ -238,21 +239,21 @@ export async function createCrystalPathTraceScene(
       for (let polyhedronIndex = 0; polyhedronIndex < source.polyhedra.length; polyhedronIndex++) {
         if (polyhedronIndex % 16 === 0) await yieldPreparation(signal);
         const polyhedron = source.polyhedra[polyhedronIndex]!;
-        const centerAtom = source.atoms[polyhedron.centerAtomIndex];
+        const centerAtom = polyhedronAtoms[polyhedron.centerAtomIndex];
         if (!centerAtom) continue;
         if (polyhedron.faces.length > PATH_TRACING_GEOMETRY_LIMITS.facesPerPolyhedron
           || polyhedron.hullAtomIndices.length > PATH_TRACING_GEOMETRY_LIMITS.facesPerPolyhedron) {
           throw geometryLimitError();
         }
-        if (polyhedron.hullAtomIndices.some(index => !source.atoms[index])) continue;
-        for (const index of polyhedron.hullAtomIndices) assertFinitePoint(source.atoms[index]!.position);
-        const geometry = polyhedronGeometryFromAtoms(polyhedron, source.atoms);
+        if (polyhedron.hullAtomIndices.some(index => !polyhedronAtoms[index])) continue;
+        for (const index of polyhedron.hullAtomIndices) assertFinitePoint(polyhedronAtoms[index]!.position);
+        const geometry = polyhedronGeometryFromAtoms(polyhedron, polyhedronAtoms);
         if (!geometry) continue;
         geometries.add(geometry);
         // The viewport draws coincident shared faces once; keep the same optical thickness here.
         const uniqueIndices: number[] = [];
         for (const face of polyhedron.faces) {
-          const key = face.map(index => source.atoms[polyhedron.hullAtomIndices[index]!]!.position.join(",")).sort().join("|");
+          const key = face.map(index => polyhedronAtoms[polyhedron.hullAtomIndices[index]!]!.position.join(",")).sort().join("|");
           if (seenFaces.has(key)) continue;
           seenFaces.add(key);
           uniqueIndices.push(...face);
@@ -272,7 +273,7 @@ export async function createCrystalPathTraceScene(
           geometry.dispose();
           geometries.delete(geometry);
         }
-        const edges = createPolyhedronEdges([polyhedron], source.atoms);
+        const edges = createPolyhedronEdges([polyhedron], polyhedronAtoms);
         for (let index = 0; index < edges.length; index++) {
           const edge = edges[index]!;
           const key = `${edge.start.join(",")}|${edge.end.join(",")}`;
@@ -382,9 +383,10 @@ export async function createCrystalPathTraceScene(
               bicolor ? "#ffffff" : item.startColor, item.opacity, bicolor) });
           });
           const polyhedronOpacity = next.componentOpacity.polyhedra / 100;
+          const polyhedronAtoms = next.scene.polyhedronAtoms ?? next.scene.atoms;
           for (const mesh of meshes) {
             if (mesh.userData.kind === "polyhedron") {
-              const atom = next.scene.atoms[mesh.userData.centerAtomIndex as number]!;
+              const atom = polyhedronAtoms[mesh.userData.centerAtomIndex as number]!;
               assignments.push({ mesh, material: material("polyhedron", families.polyhedron,
                 polyhedronColorForElement(next.style, atom.element), polyhedronOpacity) });
             } else if (mesh.userData.kind === "polyhedron-edge") {
@@ -435,7 +437,7 @@ export async function createCrystalPathTraceScene(
 /** Compare owned geometry inputs by value; React visibility selectors can return new arrays. */
 function snapshotGeometryIdentity(options: CrystalPathTraceSceneOptions): string {
   const { scene, style } = options;
-  return JSON.stringify([scene.atoms, scene.bonds, scene.polyhedra, scene.cell.vectors,
+  return JSON.stringify([scene.atoms, scene.bonds, scene.polyhedra, scene.polyhedronAtoms, scene.cell.vectors,
     options.groupPosition, options.showAtoms, options.showUnitCell, options.quality, options.meshDetail,
     options.unitCellLineStyle ?? "solid", style.bondColorMode,
     options.componentOpacity.polyhedra > 0, options.componentOpacity.unitCell > 0,

@@ -3,6 +3,9 @@ import { captureSceneVisibility, restoreObjectStyleVisibility, restoreAtomColors
 import { useMeasurementTools } from "./hooks/useMeasurementTools";
 import { MeasurementToolsPanel } from "./controls/commonPanel/MeasurementToolsPanel";
 import { type WorkspacePreferences } from "./workspaceStorage";
+import { mapModelReferences, transitionModelReferences } from "../model/measurementModelMapping";
+import { preparePolyhedronDisplay } from "../model/polyhedronDisplay";
+import { applySceneDeletions } from "../model/sceneEdits";
 import { createPortal } from "react-dom";
 import { loadDocuments, createEmptyManifest, type StoredDocuments } from "./documentStorage";
 import { DocumentWorkspace } from "./DocumentWorkspace";
@@ -84,7 +87,6 @@ import {
   InspectorToggle,
 } from "./inspector/InspectorSidebar";
 import {
-  hasPolyhedra,
   previewSafeAreaForInspector,
   sceneOffsetXForInspector,
   NARROW_PREVIEW_BREAKPOINT_PX,
@@ -251,7 +253,7 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
     visibleScene: appearance.visibleScene,
   });
   const measurementTools = useMeasurementTools({
-    scene, visibleScene: appearance.visibleScene, resetToken: session?.model ? 0 : workspaceResetRequest.token,
+    scene: appearance.geometryScene, visibleScene: appearance.visibleScene, resetToken: session?.model ? 0 : workspaceResetRequest.token,
     selection: interaction.selection, select: interaction.replaceSelection,
     initial: initialWorkspace?.preferences.measurementTools,
   });
@@ -268,12 +270,15 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
     if (!session?.model) return;
     return editing.registerModelEditing({
       read: () => readSession()!.model!.state,
-      readReferences: measurementTools.getModelReferences,
+      readReferences: () => ({ ...measurementTools.getModelReferences(), polyhedronDisplay: appearance.getPolyhedronDisplay() }),
       replace: (state, replay) => {
         const before = readSession()!;
         const nextScene = modeling.preparedSceneFor(state)
           ?? modelToScene(state, before.customBondingProfile?.cutoffOverrides, before.scene.bondTolerance);
-        measurementTools.transitionModelReferences(before.model!.state, state, before.scene, nextScene, replay);
+        const references = transitionModelReferences({ ...measurementTools.getModelReferences(), polyhedronDisplay: appearance.getPolyhedronDisplay() },
+          before.model!.state, state, before.scene, nextScene, replay);
+        measurementTools.restoreModelReferences(references);
+        if (references.polyhedronDisplay) appearance.restorePolyhedronDisplay(references.polyhedronDisplay);
         replaceModel(state, nextScene);
         // The same image ID can refer to a different physical copy after changing the cell.
         const sameCell = before.model!.state.structure.cell.vectors.every((vector, axis) =>
@@ -283,14 +288,27 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
       },
     });
   }, [session?.id, Boolean(session?.model), editing.registerModelEditing, readSession, replaceModel,
-    modeling.preparedSceneFor, measurementTools.getModelReferences, measurementTools.transitionModelReferences,
+    modeling.preparedSceneFor, measurementTools.getModelReferences, measurementTools.restoreModelReferences,
+    appearance.getPolyhedronDisplay, appearance.restorePolyhedronDisplay,
     interaction.pruneSelection, interaction.clearSelection]);
   useEffect(() => {
     if (interaction.activeInspectorTab !== "modeling" || !interaction.isInspectorOpen) modeling.cancel();
   }, [interaction.activeInspectorTab, interaction.isInspectorOpen, modeling.cancel]);
-  const modelingPreviewScene = useMemo(() => modeling.previewScene ? visibleSceneForComponents(modeling.previewScene,
+  const modelingGeometryScene = useMemo(() => {
+    if (!modeling.previewScene || appearance.polyhedronDisplay.mode === "auto") return modeling.previewScene;
+    const preview = applySceneDeletions(modeling.previewScene, {
+      atoms: new Set(editing.snapshot.deleted.atoms), bonds: new Set(editing.snapshot.deleted.bonds),
+    })!;
+    const display = session?.model && modeling.previewState
+      ? mapModelReferences({ measurements: [], focus: null, polyhedronDisplay: appearance.polyhedronDisplay },
+        session.model.state, modeling.previewState, session.scene, preview).polyhedronDisplay!
+      : appearance.polyhedronDisplay;
+    return preparePolyhedronDisplay(preview, display).scene;
+  }, [modeling.previewScene, modeling.previewState, session?.model?.state, session?.scene,
+    appearance.polyhedronDisplay, editing.snapshot.deleted]);
+  const modelingPreviewScene = useMemo(() => modelingGeometryScene ? visibleSceneForComponents(modelingGeometryScene,
     appearance.componentVisibility, appearance.style.objectStyles, appearance.bondVisibilityOverrides) : null,
-  [modeling.previewScene, appearance.componentVisibility, appearance.style.objectStyles, appearance.bondVisibilityOverrides]);
+  [modelingGeometryScene, appearance.componentVisibility, appearance.style.objectStyles, appearance.bondVisibilityOverrides]);
   const modelExportBlock = modeling.controller.preview || modeling.controller.busy ? t("modeling.pendingExport") : undefined;
   const poscarExport = usePoscarExportController(sourceScene ? { file: session?.file ?? null,
     fileName: selectedFileName, scene: sourceScene, deletedAtomIds: editing.snapshot.deleted.atoms,
@@ -470,7 +488,8 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
     modelDocument: Boolean(session.model),
     sessionId: session.id,
     appearance: { style, componentVisibility, componentOpacity, bondVisibilityOverrides,
-      previewMeshQuality, unitCellLineStyle, structureLineWidth, showCrystalAxisLabels },
+      previewMeshQuality, unitCellLineStyle, structureLineWidth, showCrystalAxisLabels,
+      polyhedronDisplay: appearance.polyhedronDisplay },
     edits: editing.snapshot,
     viewState,
     viewScale: cameraInteractionStore.getViewScaleSnapshot(),
@@ -479,7 +498,7 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
     measurementTools: measurementTools.snapshot,
     poscarDraft: poscarExport.snapshot,
   } : null, [session, style, componentVisibility, componentOpacity, bondVisibilityOverrides,
-    previewMeshQuality, unitCellLineStyle, structureLineWidth, showCrystalAxisLabels,
+    previewMeshQuality, unitCellLineStyle, structureLineWidth, showCrystalAxisLabels, appearance.polyhedronDisplay,
     editing.snapshot, viewState, cameraInteractionStore, exportSettings, measurementTools.snapshot, poscarExport.snapshot]);
   const persistence = useWorkspacePersistence(session, workspacePreferences, cameraInteractionStore, cameraOrientationRef);
   const latestEditor = useRef({ isExporting, workspacePreferences });
@@ -703,7 +722,7 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
                 interactionMode={viewState.interactionMode}
                 selectionActivation={measurementMode ? "single" : selectionActivation}
                 mouseInertia={viewState.mouseInertia}
-                layoutScene={modeling.previewScene ?? appearance.geometryScene ?? visibleScene!}
+                layoutScene={modelingGeometryScene ?? appearance.geometryScene ?? visibleScene!}
                 resetCounter={viewState.resetCounter}
                 safeArea={previewSafeArea}
                 scene={modelingPreviewScene ?? measurementTools.previewScene ?? visibleScene!}
@@ -903,8 +922,19 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
               connectivityStatus={connectivityStatus}
               exportError={exportError}
               exportSettings={exportSettings}
-              hasPolyhedra={hasPolyhedra(scene)}
+              hasPolyhedra={(appearance.polyhedronResult?.generated ?? 0) > 0}
               polyhedronElements={polyhedronElements}
+              polyhedronControls={{
+                state: appearance.polyhedronDisplay, selectedAtomCount: interaction.selection.atoms.size,
+                requested: appearance.polyhedronResult?.requested ?? 0,
+                generated: appearance.polyhedronResult?.generated ?? 0,
+                visible: visibleScene?.polyhedra.length ?? 0,
+                issues: appearance.polyhedronResult?.issues ?? [],
+                availability: appearance.polyhedronAvailability,
+                blocked: isExporting || previewStatus === "loading" || modeling.controller.busy || Boolean(modeling.previewScene),
+                onUseSelection: () => { void appearance.changePolyhedronDisplay({ mode: "selected", centerAtomIds: [...interaction.selection.atoms] }); },
+                onAutomatic: () => { void appearance.changePolyhedronDisplay({ mode: "auto" }); },
+              }}
               colorSchemeElements={legendEntries.slice(0, 4).map(entry => entry.element)}
               isExporting={isExporting}
               onActiveTabChange={handleActiveCommonPanelTabChange}

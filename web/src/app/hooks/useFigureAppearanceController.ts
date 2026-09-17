@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { captureSceneVisibility, restoreObjectStyleVisibility, type SceneVisibilitySnapshot } from "./useSceneEdits";
 
 import type { SceneSpec } from "../../api/scene";
+import { DEFAULT_POLYHEDRON_DISPLAY, MAX_POLYHEDRON_CENTERS, preparePolyhedronDisplay,
+  classifyAutoPolyhedronAvailability, type PolyhedronDisplayState } from "../../model/polyhedronDisplay";
 import {
   DEFAULT_SHOW_CRYSTAL_AXIS_LABELS,
   DEFAULT_STRUCTURE_LINE_WIDTH,
@@ -71,18 +73,24 @@ export function useFigureAppearanceController({
   );
   const [bondVisibilityOverrides, setBondVisibilityOverrides] =
     useState<BondVisibilityOverrides>(() => initialState?.bondVisibilityOverrides ?? createDefaultBondVisibilityOverrides());
-  const currentAppearance = useRef({ style, componentVisibility, bondVisibilityOverrides });
-  currentAppearance.current = { style, componentVisibility, bondVisibilityOverrides };
+  const [polyhedronDisplay, setPolyhedronDisplay] = useState<PolyhedronDisplayState>(
+    () => initialState?.polyhedronDisplay ?? DEFAULT_POLYHEDRON_DISPLAY,
+  );
+  const polyhedronRequest = useRef(0);
+  useEffect(() => () => { polyhedronRequest.current++; }, []);
+  const currentAppearance = useRef({ style, componentVisibility, bondVisibilityOverrides, polyhedronDisplay });
+  currentAppearance.current = { style, componentVisibility, bondVisibilityOverrides, polyhedronDisplay };
   const commitVisibility = useCallback((next: typeof currentAppearance.current, record = true) => {
     const previous = currentAppearance.current;
     if (record) recordVisibilityChange?.(
-      captureSceneVisibility(previous.style.objectStyles, previous.componentVisibility, previous.bondVisibilityOverrides),
-      captureSceneVisibility(next.style.objectStyles, next.componentVisibility, next.bondVisibilityOverrides),
+      captureSceneVisibility(previous.style.objectStyles, previous.componentVisibility, previous.bondVisibilityOverrides, previous.polyhedronDisplay),
+      captureSceneVisibility(next.style.objectStyles, next.componentVisibility, next.bondVisibilityOverrides, next.polyhedronDisplay),
     );
     currentAppearance.current = next;
     setRawStyle(next.style);
     setComponentVisibility(next.componentVisibility);
     setBondVisibilityOverrides(next.bondVisibilityOverrides);
+    setPolyhedronDisplay(next.polyhedronDisplay);
   }, [recordVisibilityChange]);
   const setStyle = useCallback<Dispatch<SetStateAction<StyleState>>>(value => {
     const previous = currentAppearance.current;
@@ -90,11 +98,13 @@ export function useFigureAppearanceController({
     commitVisibility({ ...previous, style: nextStyle });
   }, [commitVisibility]);
   const restoreVisibilityState = useCallback((snapshot: SceneVisibilitySnapshot) => {
+    polyhedronRequest.current++;
     const previous = currentAppearance.current;
     commitVisibility({
       style: { ...previous.style, objectStyles: restoreObjectStyleVisibility(previous.style.objectStyles, snapshot) },
       componentVisibility: snapshot.componentVisibility,
       bondVisibilityOverrides: { hiddenFamilies: new Set(snapshot.hiddenBondFamilies), hiddenBondRelations: new Set(snapshot.hiddenBondRelations) },
+      polyhedronDisplay: snapshot.polyhedronDisplay ?? DEFAULT_POLYHEDRON_DISPLAY,
     }, false);
   }, [commitVisibility]);
   const colorSchemeSelectionRef = useRef({
@@ -103,8 +113,13 @@ export function useFigureAppearanceController({
   });
 
   // Symmetry/warning updates belong to the summary UI, not to GPU geometry.
-  const geometryScene = useMemo(() => scene, [scene?.atoms, scene?.bonds,
-    scene?.polyhedra, scene?.cell, scene?.bondFamilies, scene?.sourceFormat, scene?.connectivity]);
+  const baseGeometryScene = useMemo(() => scene, [scene?.atoms, scene?.bonds,
+    scene?.polyhedra, scene?.polyhedronAtoms, scene?.cell, scene?.bondFamilies, scene?.sourceFormat, scene?.connectivity]);
+  const polyhedronResult = useMemo(() => baseGeometryScene
+    ? preparePolyhedronDisplay(baseGeometryScene, polyhedronDisplay) : null, [baseGeometryScene, polyhedronDisplay]);
+  const geometryScene = polyhedronResult?.scene ?? baseGeometryScene;
+  const polyhedronAvailability = useMemo(() => baseGeometryScene
+    ? classifyAutoPolyhedronAvailability(baseGeometryScene) : "no-bonds", [baseGeometryScene]);
   const visibleScene = useMemo(
     () => visibleSceneForComponents(
       geometryScene,
@@ -119,12 +134,13 @@ export function useFigureAppearanceController({
     [scene?.atoms],
   );
   const polyhedronElements = useMemo(() => {
-    if (!scene) return [];
-    return [...new Set(scene.polyhedra.flatMap(polyhedron => {
-      const center = scene.atoms[polyhedron.centerAtomIndex];
+    if (!geometryScene) return [];
+    const atoms = geometryScene.polyhedronAtoms ?? geometryScene.atoms;
+    return [...new Set(geometryScene.polyhedra.flatMap(polyhedron => {
+      const center = atoms[polyhedron.centerAtomIndex];
       return center ? [center.element] : [];
     }))];
-  }, [scene?.atoms, scene?.polyhedra]);
+  }, [geometryScene?.atoms, geometryScene?.polyhedra, geometryScene?.polyhedronAtoms]);
   const elementColorOverrides = useMemo(
     () => scene ? elementColorOverridesForStyle(scene.atoms, style) : undefined,
     [scene?.atoms, style],
@@ -150,13 +166,30 @@ export function useFigureAppearanceController({
   }, [closeActiveColorPicker, style.colorScheme, style.colorSchemeMode]);
 
   const resetAppearance = useCallback((nextScene: SceneSpec | null) => {
+    polyhedronRequest.current++;
     commitVisibility({ style: createDefaultStyle(), componentVisibility: createDefaultComponentVisibility(nextScene),
-      bondVisibilityOverrides: createDefaultBondVisibilityOverrides() }, false);
+      bondVisibilityOverrides: createDefaultBondVisibilityOverrides(), polyhedronDisplay: DEFAULT_POLYHEDRON_DISPLAY }, false);
     setComponentOpacity(createDefaultComponentOpacity());
     setPreviewMeshQuality(defaultPreviewMeshQualityForScene(nextScene));
     setUnitCellLineStyle(DEFAULT_UNIT_CELL_LINE_STYLE);
     setStructureLineWidth(DEFAULT_STRUCTURE_LINE_WIDTH);
     setShowCrystalAxisLabels(DEFAULT_SHOW_CRYSTAL_AXIS_LABELS);
+  }, [commitVisibility]);
+
+  const changePolyhedronDisplay = useCallback(async (next: PolyhedronDisplayState) => {
+    if (connectivityStatus === "loading") return;
+    if (next.mode === "selected" && (!next.centerAtomIds.length || next.centerAtomIds.length > MAX_POLYHEDRON_CENTERS)) return;
+    const request = ++polyhedronRequest.current;
+    if (connectivityStatus !== "ready" && !await requestConnectivity("polyhedra")) return;
+    if (request !== polyhedronRequest.current) return;
+    const current = currentAppearance.current;
+    commitVisibility({ ...current, polyhedronDisplay: next,
+      componentVisibility: { ...current.componentVisibility, polyhedra: true } });
+  }, [commitVisibility, connectivityStatus, requestConnectivity]);
+  const getPolyhedronDisplay = useCallback(() => currentAppearance.current.polyhedronDisplay, []);
+  const restorePolyhedronDisplay = useCallback((next: PolyhedronDisplayState) => {
+    polyhedronRequest.current++;
+    commitVisibility({ ...currentAppearance.current, polyhedronDisplay: next }, false);
   }, [commitVisibility]);
 
   const handleComponentVisibilityChange = useCallback(async (
@@ -174,6 +207,7 @@ export function useFigureAppearanceController({
 
     const current = currentAppearance.current;
     commitVisibility({
+      ...current,
       style: value && key === "atoms" ? { ...current.style, objectStyles: clearObjectStyleProperty(current.style.objectStyles, "visible") } : current.style,
       componentVisibility: { ...current.componentVisibility, [key]: value },
       bondVisibilityOverrides: value && key === "bonds" ? createDefaultBondVisibilityOverrides() : current.bondVisibilityOverrides,
@@ -285,6 +319,12 @@ export function useFigureAppearanceController({
     legendEntries,
     objectStyleAtoms,
     polyhedronElements,
+    polyhedronDisplay,
+    polyhedronResult,
+    polyhedronAvailability,
+    changePolyhedronDisplay,
+    getPolyhedronDisplay,
+    restorePolyhedronDisplay,
     previewMeshQuality,
     resetAppearance,
     setBondVisible,

@@ -44,6 +44,8 @@ import {
 
 const EXPORT_ACCESSORY_PADDING_RATIO = 0.08;
 
+export type MovableFigureLayerId = "legend" | "crystalAxes" | `measurement:${string}`;
+
 export interface CombinedExportRasterOptions {
   renderControl?: FigureRenderControl;
   cameraPose: CameraPoseSnapshot;
@@ -60,7 +62,8 @@ export interface CombinedExportRasterOptions {
 }
 
 export interface CombinedExportLayer {
-  id?: "structure" | "legend" | "crystalAxes";
+  id?: "structure" | MovableFigureLayerId;
+  label?: string;
   previewBlob?: Blob;
   image: RasterExportImage;
   textItems: RasterExportTextItem[];
@@ -89,6 +92,7 @@ export async function prepareCombinedExportLayers({
   visibleScene,
 }: CombinedExportRasterOptions): Promise<PreparedCombinedExport> {
   const layers: CombinedExportLayer[] = [];
+  let measurementLayers: CombinedExportLayer[] = [];
   let structureBounds: RasterExportBounds = fullLayerBounds(settings.width, settings.height);
 
   if (settings.components.structure) {
@@ -107,15 +111,13 @@ export async function prepareCombinedExportLayers({
       structureLineWidth,
       unitCellLineStyle,
       visibleScene,
+      separateMeasurementLabels: true,
     });
-    structureBounds = structureImage.contentBounds ?? structureBounds;
-    layers.push({
-      id: "structure",
-      image: structureImage,
-      textItems: [],
-      x: 0,
-      y: 0,
-    });
+    const structureLayers = structureExportLayers(structureImage);
+    structureBounds = structureImage.accessoryReferenceBounds ?? combinedContentBounds(structureLayers);
+    const [structureLayer, ...labels] = structureLayers;
+    layers.push(structureLayer!);
+    measurementLayers = labels;
   }
 
   const accessoryReferenceSize = exportAccessoryReferenceSizeFromBounds(structureBounds);
@@ -188,7 +190,17 @@ export async function prepareCombinedExportLayers({
     });
   }
 
-  return { layers, width: settings.width, height: settings.height };
+  return { layers: [...layers, ...measurementLayers], width: settings.width, height: settings.height };
+}
+
+/** Split only the supplied text payload; the structure raster is already label-free. */
+export function structureExportLayers(image: RasterExportImage): CombinedExportLayer[] {
+  const { measurementLabels, ...baseImage } = image;
+  return [
+    { id: "structure", image: measurementLabels ? baseImage : image, textItems: [], x: 0, y: 0 },
+    ...(measurementLabels ?? []).map(label => ({ id: `measurement:${label.id}` as const,
+      label: label.label, image: label.image, textItems: [], x: label.x, y: label.y })),
+  ];
 }
 
 export async function renderCombinedExportRaster(options: CombinedExportRasterOptions): Promise<RasterExportImage> {
@@ -200,11 +212,14 @@ export function layoutCombinedExport(prepared: PreparedCombinedExport, layout?: 
     throw new Error("Figure export layout is invalid.");
   }
   const layers = prepared.layers.map(layer => {
-    const offset = layer.id === "legend" || layer.id === "crystalAxes" ? layout?.[layer.id] : undefined;
-    return { ...layer,
-      x: Math.round(layer.x + (offset?.x ?? 0) * prepared.width),
-      y: Math.round(layer.y + (offset?.y ?? 0) * prepared.height),
-    };
+    const offset = layer.id && layer.id !== "structure" ? figureExportLayerOffset(layout, layer.id) : { x: 0, y: 0 };
+    const measurement = layer.id?.startsWith("measurement:");
+    const movedX = layer.x + offset.x * prepared.width;
+    const movedY = layer.y + offset.y * prepared.height;
+    const x = measurement ? movedX : Math.round(movedX);
+    const y = measurement ? movedY : Math.round(movedY);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("Figure export layout is invalid.");
+    return { ...layer, x, y };
   });
   const contentBounds = combinedContentBounds(layers);
   const bounds = layout?.margins
@@ -215,6 +230,32 @@ export function layoutCombinedExport(prepared: PreparedCombinedExport, layout?: 
 
 export function defaultFigureExportLayout(): FigureExportLayout {
   return { legend: { x: 0, y: 0 }, crystalAxes: { x: 0, y: 0 } };
+}
+
+export function figureExportLayerOffset(layout: FigureExportLayout | undefined, id: MovableFigureLayerId): { x: number; y: number } {
+  if (id === "legend" || id === "crystalAxes") return layout?.[id] ?? { x: 0, y: 0 };
+  const measurementId = id.slice("measurement:".length);
+  const labels = layout?.measurementLabels;
+  return labels && Object.hasOwn(labels, measurementId) ? labels[measurementId]! : { x: 0, y: 0 };
+}
+
+export function withFigureExportLayerOffset(layout: FigureExportLayout | undefined, id: MovableFigureLayerId,
+  offset: { x: number; y: number }): FigureExportLayout {
+  const current = layout ?? defaultFigureExportLayout();
+  const next = id === "legend" || id === "crystalAxes" ? { ...current, [id]: { ...offset } }
+    : { ...current, measurementLabels: { ...current.measurementLabels, [id.slice("measurement:".length)]: { ...offset } } };
+  if (!isFigureExportLayout(next)) throw new Error("Figure export layout is invalid.");
+  return next;
+}
+
+/** Separate structure files use their own canvas, without combined accessory placement. */
+export function structureOnlyFigureExportLayout(layout: FigureExportLayout | undefined): FigureExportLayout | undefined {
+  if (layout === undefined) return undefined;
+  if (!isFigureExportLayout(layout)) throw new Error("Figure export layout is invalid.");
+  if (!layout.measurementLabels || Object.keys(layout.measurementLabels).length === 0) return undefined;
+  return { ...defaultFigureExportLayout(), measurementLabels: Object.fromEntries(
+    Object.entries(layout.measurementLabels).map(([id, offset]) => [id, { ...offset }]),
+  ) };
 }
 
 export function currentFigureExportMargins(prepared: PreparedCombinedExport, layout?: FigureExportLayout) {
@@ -267,11 +308,17 @@ export async function composeCombinedExportRaster(
 
   fillCanvasBackground(context, outputBounds.width, outputBounds.height, settings.background);
   const textItems: RasterExportTextItem[] = [];
+  const measurementLabels: NonNullable<RasterExportImage["measurementLabels"]> = [];
   const shiftX = -outputBounds.minX;
   const shiftY = -outputBounds.minY;
   for (const layer of layers) {
     const x = layer.x + shiftX;
     const y = layer.y + shiftY;
+    if (settings.format === "pdf" && layer.id?.startsWith("measurement:")) {
+      const id = layer.id.slice("measurement:".length);
+      measurementLabels.push({ id, label: layer.label ?? id, image: layer.image, x, y });
+      continue;
+    }
     await drawRasterExportImage(context, layer.image, x, y);
     textItems.push(...offsetTextItems(layer.textItems, x, y));
   }
@@ -285,6 +332,7 @@ export async function composeCombinedExportRaster(
     height: outputBounds.height,
     textItems,
     width: outputBounds.width,
+    ...(measurementLabels.length ? { measurementLabels } : {}),
   };
 }
 
@@ -343,12 +391,16 @@ export function combinedLayerBounds(
   baseHeight: number,
 ) {
   const bounds = layers.reduce(
-    (current, layer) => ({
-      maxX: Math.max(current.maxX, layer.x + layer.image.width),
-      maxY: Math.max(current.maxY, layer.y + layer.image.height),
-      minX: Math.min(current.minX, layer.x),
-      minY: Math.min(current.minY, layer.y),
-    }),
+    (current, layer) => {
+      const content = layer.id?.startsWith("measurement:") && layer.image.contentBounds
+        ? layer.image.contentBounds : fullLayerBounds(layer.image.width, layer.image.height);
+      return {
+        maxX: Math.max(current.maxX, layer.x + content.maxX),
+        maxY: Math.max(current.maxY, layer.y + content.maxY),
+        minX: Math.min(current.minX, layer.x + content.minX),
+        minY: Math.min(current.minY, layer.y + content.minY),
+      };
+    },
     {
       maxX: baseWidth,
       maxY: baseHeight,

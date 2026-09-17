@@ -11,6 +11,14 @@ type CameraQuaternion = [number, number, number, number];
 const IDENTITY: CameraQuaternion = [0, 0, 0, 1];
 
 describe("measurement label layout", () => {
+  test("supports a real 25 percent glyph size without changing the default scale", () => {
+    const normal = measurementLabelSize("2.500 Å", 6);
+    const small = measurementLabelSize("2.500 Å", 6, 25);
+    expect(small.width).toBeCloseTo(normal.width / 4, 12);
+    expect(small.height).toBeCloseTo(normal.height / 4, 12);
+    expect(measurementLabelSize("2.500 Å", 6, 0)).toEqual(small);
+    expect(measurementLabelSize("2.500 Å", 6, NaN)).toEqual(normal);
+  });
   test("keeps an unobstructed distance label beside the midpoint instead of on the measured line", () => {
     const measurement = distance("distance");
     const anchor = layoutMeasurementLabels({ measurements: [measurement], cameraQuaternion: IDENTITY, span: 6 }).get("distance")!;

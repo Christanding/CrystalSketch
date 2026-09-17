@@ -40,6 +40,7 @@ import type {
 } from "../../../model";
 import { GLASS_SURFACE_CLASS } from "../../surface";
 import { DisplayTabContent } from "./DisplayTab";
+import type { PolyhedronControlModel } from "./PolyhedronControls";
 import { ExportTabContent } from "./ExportTab";
 import { MaterialPresetTokenPreloadPool } from "./MaterialPresetToken3D";
 import { OrientationTabContent } from "./OrientationTab";
@@ -83,6 +84,7 @@ export function CommonControlsPanel({
   exportSettings,
   hasPolyhedra,
   polyhedronElements,
+  polyhedronControls,
   colorSchemeElements,
   isExporting,
   onComponentOpacityChange,
@@ -115,6 +117,7 @@ export function CommonControlsPanel({
   exportSettings: ExportSettingsState;
   hasPolyhedra: boolean;
   polyhedronElements: string[];
+  polyhedronControls: PolyhedronControlModel;
   colorSchemeElements?: readonly string[];
   isExporting: boolean;
   onCameraPrimaryChange: (primary: CrystalCameraPrimaryDirection) => void;
@@ -378,6 +381,7 @@ export function CommonControlsPanel({
                 connectivityStatus={connectivityStatus}
                 hasPolyhedra={hasPolyhedra}
                 polyhedronElements={polyhedronElements}
+                polyhedronControls={polyhedronControls}
                 style={style}
                 onStyleChange={onStyleChange}
                 opacity={componentOpacity}

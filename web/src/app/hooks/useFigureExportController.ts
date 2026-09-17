@@ -281,9 +281,13 @@ export function useFigureExportController({
   }, []);
 
   const handleFigurePreviewLayoutChange = useCallback((layout: FigureExportLayout | undefined) => {
-    setExportSettings(current => ({ ...current, previewLayout: layout }));
+    const ids = new Set(scene?.measurements?.map(measurement => measurement.id));
+    const next = layout?.measurementLabels ? { ...layout,
+      measurementLabels: Object.fromEntries(Object.entries(layout.measurementLabels).filter(([id]) => ids.has(id))),
+    } : layout;
+    setExportSettings(current => ({ ...current, previewLayout: next }));
     setExportError(null);
-  }, []);
+  }, [scene?.measurements]);
 
   return {
     exportProgress,

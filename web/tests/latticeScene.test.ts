@@ -23,6 +23,7 @@ import {
 } from "../src/model";
 import {
   STRUCTURE_MATERIAL_TARGETS,
+  resolveStructureMaterialFamiliesForStyle,
   resolveStructureMaterialFamilyForStyle,
   resolveStructureMaterialFamilyForTarget,
 } from "../src/scene/materialPresetResolver";
@@ -46,10 +47,14 @@ import {
 import {
   createPolyhedronSurfaceBatchBuild,
   disposePolyhedronSurfaceBatchBuild,
+  MemoizedBatchedPolyhedra,
   POLYHEDRON_EDGE_COLOR,
   POLYHEDRON_EDGE_OPACITY,
   POLYHEDRON_EDGE_LINE_WIDTH_PIXELS,
 } from "../src/scene/BatchedPolyhedra";
+import { StructureSceneObjects } from "../src/scene/StructureSceneObjects";
+import { BatchedAtoms } from "../src/scene/BatchedAtoms";
+import { BatchedBonds } from "../src/scene/BatchedBonds";
 import { bondBatchPopulationKey } from "../src/scene/BatchedBonds";
 import { createAtomRenderItems } from "../src/scene/AtomRenderItems";
 import { createBondRenderItems } from "../src/scene/BondRenderItems";
@@ -539,6 +544,28 @@ describe("computeSceneLayout", () => {
     expect(layout.depthFadingBackOffset).toBeCloseTo(expectedBackOffset);
   });
 
+  test("fits independent polyhedron vertices around the unchanged cell center without hidden sphere radii", () => {
+    const scene = sceneWithIndependentPolyhedra();
+    const automatic = computeSceneLayout({ ...scene, polyhedronAtoms: undefined, polyhedra: [] });
+    const layout = computeSceneLayout(scene);
+    expect(layout.groupPosition).toEqual(automatic.groupPosition);
+    expect(layout.span).toBe(automatic.span);
+    expect(layout.cameraPose).toEqual(automatic.cameraPose);
+    expect(computeSceneLayout(scene, "vdw")).toEqual(layout);
+    const outward = new Vector3(...layout.cameraPose.outward).normalize();
+    const right = new Vector3(...layout.cameraPose.cameraUp).cross(outward).normalize();
+    const up = outward.clone().cross(right).normalize();
+    const offset = new Vector3(...layout.groupPosition);
+    for (const index of scene.polyhedra[0]!.hullAtomIndices) {
+      const vertex = new Vector3(...scene.polyhedronAtoms![index]!.position).add(offset);
+      expect(Math.abs(vertex.dot(right))).toBeLessThanOrEqual(layout.cameraFitBounds.projectedWidth / 2 + 1e-9);
+      expect(Math.abs(vertex.dot(up))).toBeLessThanOrEqual(layout.cameraFitBounds.projectedHeight / 2 + 1e-9);
+      expect(vertex.dot(outward)).toBeGreaterThanOrEqual(-layout.depthFadingBackOffset - 1e-9);
+      expect(vertex.dot(outward)).toBeLessThanOrEqual(-layout.depthFadingFrontOffset + 1e-9);
+    }
+    expect(computeSceneLayout({ ...scene, polyhedra: [] })).toEqual(automatic);
+  });
+
   test("tracks the standard-view projected fit size for slender unit cells", () => {
     const layout = computeSceneLayout(sceneWithLongCell());
 
@@ -840,6 +867,25 @@ describe("computeSceneLayout", () => {
     ).toBeCloseTo(2.25);
   });
 
+  test("fits exported independent faces without rendering or measuring hidden atoms as spheres", () => {
+    const scene = sceneWithIndependentPolyhedra();
+    const options = {
+      scene,
+      cameraPose: createCameraPoseSnapshot(new Quaternion()),
+      groupPosition: [0, 0, 0] as [number, number, number],
+      componentOpacity: createDefaultComponentOpacity(),
+      showAtoms: true,
+      showUnitCell: false,
+      style: createDefaultStyle(),
+    };
+    const expected = { minX: -8, maxX: 6, minY: -4, maxY: 5, width: 14, height: 9, centerX: -1, centerY: 0.5 };
+    expect(computeStructureProjectedBounds(options)).toEqual(expected);
+    expect(computeStructureProjectedBounds({ ...options, showAtoms: false })).toEqual(expected);
+    expect(computeStructureExportFramePlan({ ...options, width: 1400, height: 900 }).bounds).toEqual(expected);
+    expect(computeStructureProjectedBounds({ ...options, showAtoms: false,
+      componentOpacity: { ...options.componentOpacity, polyhedra: 0 } })).toBeNull();
+  });
+
   test("leaves export framing unchanged when measurements are empty or unresolved", () => {
     const scene = sceneWithOffCenterAtoms();
     const options = {
@@ -1128,6 +1174,38 @@ describe("computeSceneLayout", () => {
     expect(polyhedronFamily.material.type).toBe("MeshToonMaterial");
     expect(polyhedronFamily.material.props).toEqual({});
     disposePolyhedronSurfaceBatchBuild(batch);
+  });
+
+  test("routes independent polyhedron coordinates to the standard batch while keeping atom and bond visibility", () => {
+    const scene = sceneWithIndependentPolyhedra();
+    const style = { ...createDefaultStyle(), polyhedronColors: { Cu: "#e99a70" } };
+    const captured: ReactElement<{ children: ReactNode }>[] = [];
+    function CaptureStructure() {
+      captured.push(StructureSceneObjects({
+        scene, style, componentOpacity: createDefaultComponentOpacity(), groupPosition: [0, 0, 0],
+        materialFamilies: resolveStructureMaterialFamiliesForStyle(style), meshDetail: PREVIEW_SCENE_MESH_DETAIL,
+        showAtoms: true, showUnitCell: false,
+      }));
+      return null;
+    }
+    renderToStaticMarkup(createElement(CaptureStructure));
+    const group = captured[0]!.props.children as ReactElement<{ children: ReactNode }>;
+    const children = Children.toArray(group.props.children) as ReactElement<Record<string, unknown>>[];
+    const polyhedra = children.find(child => child.type === MemoizedBatchedPolyhedra)!;
+    const atoms = children.find(child => child.type === BatchedAtoms)!;
+    expect(polyhedra.props.atoms).toBe(scene.polyhedronAtoms);
+    expect(atoms.props.atoms).toBe(scene.atoms);
+    expect(children.some(child => child.type === BatchedBonds)).toBe(false);
+    const batch = createPolyhedronSurfaceBatchBuild({
+      atoms: polyhedra.props.atoms as AtomSpec[], polyhedra: scene.polyhedra, style,
+    })!;
+    try {
+      expect(batch.itemCount).toBe(1);
+      expect(batch.items[0]!.color.getHexString()).toBe("e99a70");
+      expect(batch.edges).toHaveLength(6);
+      expect(batch.items[0]!.geometry.boundingBox!.min.toArray()).toEqual([-8, -4, 0]);
+      expect(batch.items[0]!.geometry.boundingBox!.max.toArray()).toEqual([6, 5, 7]);
+    } finally { disposePolyhedronSurfaceBatchBuild(batch); }
   });
 
   test("builds one surface batch for valid polyhedra and skips invalid entries", () => {
@@ -1706,6 +1784,51 @@ describe("path tracing structure snapshot", () => {
     } finally { snapshot.dispose(); }
   });
 
+  test("traces independent polyhedron faces and colors without adding hidden atom or bond geometry", async () => {
+    const scene = sceneWithIndependentPolyhedra();
+    const options = optionsFor(scene);
+    options.componentOpacity.polyhedra = 40;
+    options.style.materialPreset = "pbr-ceramic";
+    options.style.polyhedronColors = { Cu: "#e99a70" };
+    const snapshot = await createCrystalPathTraceScene(options);
+    const batch = createPolyhedronSurfaceBatchBuild({ atoms: scene.polyhedronAtoms!, polyhedra: scene.polyhedra, style: options.style })!;
+    try {
+      const meshes: Mesh[] = [];
+      snapshot.scene.traverse(object => { if (object instanceof Mesh) meshes.push(object); });
+      const surface = meshes.find(mesh => mesh.userData.kind === "polyhedron")!;
+      expect(meshes.filter(mesh => mesh.userData.kind === "atom").map(mesh => mesh.name)).toEqual([scene.atoms[0]!.id]);
+      expect(meshes.filter(mesh => mesh.userData.kind === "bond")).toHaveLength(0);
+      expect(meshes.filter(mesh => mesh.userData.kind === "polyhedron")).toHaveLength(1);
+      const edges = meshes.filter(mesh => mesh.userData.kind === "polyhedron-edge");
+      expect(edges).toHaveLength(6);
+      expect(surface.geometry.getAttribute("position").array).toEqual(batch.items[0]!.geometry.getAttribute("position").array);
+      expect((surface.material as MeshPhysicalMaterial).color.getHexString()).toBe("e99a70");
+      for (const edge of batch.edges) {
+        const start = new Vector3(...edge.start), end = new Vector3(...edge.end);
+        const center = start.clone().add(end).multiplyScalar(0.5);
+        expect(edges.some(mesh => mesh.position.distanceTo(center) < 1e-9 && Math.abs(mesh.scale.y - start.distanceTo(end)) < 1e-9)).toBe(true);
+      }
+      const geometry = surface.geometry;
+      const next = structuredClone(options);
+      next.style.polyhedronColors = { Cu: "#8db8df" };
+      next.componentOpacity.polyhedra = 61;
+      const fresh = await createCrystalPathTraceScene(next);
+      try {
+        expect(snapshot.updateAppearance(next)).toBe(true);
+        expect(surface.geometry).toBe(geometry);
+        expect((surface.material as MeshPhysicalMaterial).color.getHexString()).toBe("8db8df");
+        expect((surface.material as MeshPhysicalMaterial).opacity).toBeCloseTo(0.61);
+        expect(snapshotContents(snapshot)).toEqual(snapshotContents(fresh));
+      } finally { fresh.dispose(); }
+      const before = snapshotContents(snapshot);
+      const moved = structuredClone(next);
+      moved.scene.polyhedronAtoms![0]!.position[0] -= 1;
+      expect(moved.scene.atoms).toEqual(next.scene.atoms);
+      expect(snapshot.updateAppearance(moved)).toBe(false);
+      expect(snapshotContents(snapshot)).toEqual(before);
+    } finally { disposePolyhedronSurfaceBatchBuild(batch); snapshot.dispose(); }
+  });
+
   test("keeps polyhedron facets and edges independent of the unit cell boundary visibility", async () => {
     const scene = sceneWithOffCenterAtoms();
     scene.polyhedra = [tetrahedronPolyhedron(), tetrahedronPolyhedron()];
@@ -1765,6 +1888,20 @@ describe("path tracing structure snapshot", () => {
       .rejects.toMatchObject({ name: "PathTracingSceneError", code: "geometry-limit" });
   });
 });
+
+function sceneWithIndependentPolyhedra(): SceneSpec {
+  const center = { ...atom("Cu-center", [-4, -1, 2]), element: "Cu" };
+  return {
+    ...sceneWithOffCenterAtoms(),
+    atoms: [center],
+    polyhedronAtoms: [
+      atom("hidden-0", [-8, -4, 0]), atom("hidden-1", [6, -4, 0]),
+      atom("hidden-2", [-8, 5, 0]), atom("hidden-3", [-8, -4, 7]), center,
+      atom("unreferenced-hidden", [1000, 1000, 1000]),
+    ],
+    polyhedra: [{ ...tetrahedronPolyhedron(), centerAtomIndex: 4 }],
+  };
+}
 
 function tetrahedronPolyhedron(): SceneSpec["polyhedra"][number] {
   return {
