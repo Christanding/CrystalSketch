@@ -63,10 +63,15 @@ def build_polyhedra(
             hull_atom_indices = [atom_index_by_key[key] for key in hull_keys]
         except KeyError:
             continue
-        positions = [
-            atom_record_cartesian_position(atom, cell_vectors) for atom in hull_atoms
+        neighbor_positions = [
+            atom_record_cartesian_position(atom, cell_vectors) for _, atom in drawn_connected_atoms
         ]
-        faces = _polyhedron_faces_from_positions(positions)
+        # Keep the center at hull index zero for consumers, but never use it to
+        # create the shell or supply volume to a degenerate coordination plane.
+        faces = [
+            [index + 1 for index in face]
+            for face in _polyhedron_faces_from_positions(neighbor_positions)
+        ]
         if not faces:
             continue
 

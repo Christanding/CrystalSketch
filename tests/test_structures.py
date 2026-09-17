@@ -14,6 +14,7 @@ import crystalsketch.structures.connectivity as connectivity_module
 import crystalsketch.structures.polyhedra as polyhedra_module
 import crystalsketch.structures.summary as summary_module
 from crystalsketch.structures.normalization import normalize_structure_for_preview
+from crystalsketch.structures.periodic_images import build_atom_records
 from crystalsketch.structures.preview_limits import PreviewLimitExceeded
 from crystalsketch.structures.readers import (
     StructureReadError,
@@ -943,10 +944,107 @@ def test_scene_response_generates_polyhedra_for_complete_coordination_environmen
     assert set(ti_polyhedron["hullAtomIndices"]).issubset(range(len(atoms)))
     assert all(len(face) == 3 for face in ti_polyhedron["faces"])
     assert all(
-        0 <= vertex_index < len(ti_polyhedron["hullAtomIndices"])
+        0 < vertex_index < len(ti_polyhedron["hullAtomIndices"])
         for face in ti_polyhedron["faces"]
         for vertex_index in face
     )
+
+
+@pytest.mark.parametrize(
+    ("center_position", "neighbor_positions", "expected_face_count"),
+    [
+        (
+            [0, 0, 0],
+            [[1, 1, 1], [-1, -1, 1], [-1, 1, -1], [1, -1, -1]],
+            4,
+        ),
+        (
+            [3, 0, 0],
+            [[1, 1, 1], [-1, -1, 1], [-1, 1, -1], [1, -1, -1]],
+            4,
+        ),
+        (
+            [0, 0, 3],
+            [[1, 1, 0], [-1, 1, 0], [-1, -1, 0], [1, -1, 0]],
+            0,
+        ),
+        (
+            [0, 3, 0],
+            [[-2, 0, 0], [-1, 0, 0], [1, 0, 0], [2, 0, 0]],
+            0,
+        ),
+        (
+            [0, 0, 3],
+            [[1, 1, 0], [-1, 1, 0], [0, -1, 0], [0, -1, 0]],
+            0,
+        ),
+        (
+            [3, 0, 0],
+            [[1, 1, 1], [-1, -1, 1], [-1, 1, -1], [1, -1, -1], [1, 1, 1]],
+            4,
+        ),
+    ],
+    ids=[
+        "tetrahedron-center-inside",
+        "tetrahedron-center-outside",
+        "coplanar-neighbors-center-off-plane",
+        "collinear-neighbors",
+        "duplicate-neighbors-collapse-to-triangle",
+        "tetrahedron-with-duplicate-neighbor",
+    ],
+)
+def test_polyhedron_shell_uses_only_coordination_neighbors(
+    center_position: list[float],
+    neighbor_positions: list[list[float]],
+    expected_face_count: int,
+) -> None:
+    positions = [center_position, *neighbor_positions]
+    structure = Structure(
+        Lattice.cubic(20),
+        ["Cu", *["O" for _ in neighbor_positions]],
+        positions,
+        coords_are_cartesian=True,
+    )
+    records = build_atom_records(structure, can_generate_periodic_images=False)
+    keys = records.canonical_source_keys
+    connectivity = connectivity_module.ConnectivityResult(
+        bonds=[],
+        connections_by_source={
+            keys[0]: [
+                connectivity_module.ConnectedAtom(
+                    source_key=keys[0],
+                    target_key=key,
+                    source_atom_id=records.sites[0].site_id,
+                    target_atom_id=records.sites[index].site_id,
+                )
+                for index, key in enumerate(keys[1:], start=1)
+            ]
+        },
+    )
+
+    polyhedra = polyhedra_module.build_polyhedra(
+        atom_index_by_key={key: index for index, key in enumerate(keys)},
+        atom_records=records.atom_records,
+        cell_vectors=structure.lattice.matrix.tolist(),
+        connectivity=connectivity,
+        structure=structure,
+    )
+
+    if expected_face_count == 0:
+        assert polyhedra == []
+        return
+
+    assert len(polyhedra) == 1
+    polyhedron = polyhedra[0]
+    assert polyhedron["centerAtomIndex"] == 0
+    assert polyhedron["hullAtomIndices"] == list(range(len(positions)))
+    assert len(polyhedron["faces"]) == expected_face_count
+    neighbor_centroid = np.mean(neighbor_positions, axis=0)
+    for face in polyhedron["faces"]:
+        assert all(0 < index < len(positions) for index in face)
+        vertices = np.array([positions[index] for index in face])
+        normal = np.cross(vertices[1] - vertices[0], vertices[2] - vertices[0])
+        assert np.dot(normal, vertices.mean(axis=0) - neighbor_centroid) > 0
 
 
 def test_polyhedron_faces_have_stable_coplanar_triangulation() -> None:

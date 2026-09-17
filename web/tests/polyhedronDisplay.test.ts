@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { SceneSpec } from "../src/api/scene";
 import { parseVaspScene } from "../src/api/vasp";
+import { buildCoordinationPolyhedron } from "../src/api/vaspPolyhedra";
 import { createDefaultComponentVisibility, visibleSceneForComponents } from "../src/model/displayState";
 import { filterSceneToAtomIds } from "../src/model/measurements";
 import { createDefaultObjectStyleState, visibleSceneForObjectStyles } from "../src/model/objectStyles";
@@ -94,6 +95,49 @@ describe("polyhedron center selection", () => {
     expect(selected(three, scene.atoms[0]!.id)).toMatchObject({ generated: 0, issues: [
       { centerAtomId: scene.atoms[0]!.id, reason: "too-few-neighbors", neighborCount: 3 },
     ] });
+  });
+
+  test("never lets an off-plane center supply volume to planar, collinear or coincident ligands", () => {
+    const scene = parseVaspScene(planar);
+    for (const positions of [
+      [[-1, -1, 0], [1, -1, 0], [1, 1, 0], [-1, 1, 0]],
+      [[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]],
+      [[0, 0, 0], [0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    ]) {
+      const atoms = scene.atoms.map((atom, index) => ({ ...atom,
+        position: (index === 0 ? [0, 0, 2] : positions[index - 1]!) as [number, number, number] }));
+      expect(buildCoordinationPolyhedron(atoms, 0, [1, 2, 3, 4])).toBeNull();
+      // Older scene data may contain a pyramid whose apex is the center.
+      const oldScene = { ...scene, atoms, polyhedra: [{ centerAtomIndex: 0,
+        hullAtomIndices: [0, 1, 2, 3, 4], faces: [[0, 1, 2] as [number, number, number]],
+        visibilityDependencies: [], visibilityDependencyGroups: [] }] };
+      expect(selected(oldScene, atoms[0]!.id)).toMatchObject({ generated: 0,
+        issues: [{ reason: "degenerate", neighborCount: 4 }] });
+      expect(preparePolyhedronDisplay(oldScene, { mode: "auto" }).generated).toBe(0);
+      expect(classifyAutoPolyhedronAvailability(oldScene)).toBe("degenerate-or-unavailable");
+      expect(oldScene.polyhedra).toHaveLength(1);
+    }
+  });
+
+  test("keeps the same ligand tetrahedron when its center is inside, on the shell or outside", () => {
+    const scene = parseVaspScene(planar);
+    const ligands: [number, number, number][] = [[1, 1, 1], [-1, -1, 1], [-1, 1, -1], [1, -1, -1]];
+    for (const center of [[0, 0, 0], [1, 1, 1], [0, 0, 3]]) {
+      const atoms = scene.atoms.map((atom, index) => ({ ...atom,
+        position: (index === 0 ? center : ligands[index - 1]!) as [number, number, number] }));
+      const hull = buildCoordinationPolyhedron(atoms, 0, [1, 2, 3, 4])!;
+      expect(hull.centerAtomIndex).toBe(0);
+      expect(hull.hullAtomIndices).toEqual([0, 1, 2, 3, 4]);
+      expect(hull.faces).toHaveLength(4);
+      expect(hull.faces.every(face => face.every(index => index > 0))).toBe(true);
+      expect(new Set(hull.faces.flat())).toEqual(new Set([1, 2, 3, 4]));
+      const legacy = { ...hull, faces: [[0, 1, 2] as [number, number, number]],
+        visibilityDependencies: ["boundaryAtoms" as const], visibilityDependencyGroups: [["boundaryAtoms" as const]] };
+      const repaired = preparePolyhedronDisplay({ ...scene, atoms, polyhedra: [legacy] }, { mode: "auto" }).scene.polyhedra[0]!;
+      expect(repaired.faces).toHaveLength(4);
+      expect(repaired.faces.every(face => face.every(index => index > 0))).toBe(true);
+      expect(repaired.visibilityDependencies).toEqual(legacy.visibilityDependencies);
+    }
   });
 
   test("keeps selected geometry indexed to raw coordinates while atom, element and periodic visibility hide spheres and bonds", () => {

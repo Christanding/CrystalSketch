@@ -3,6 +3,7 @@ import type { CameraPoseSnapshot } from "../scene/cameraPose";
 import type {
   RasterExportBounds,
   RasterExportImage,
+  RasterExportMeasurementText,
   RasterExportTextItem,
 } from "../scene/exportRenderer";
 import type {
@@ -64,6 +65,7 @@ export interface CombinedExportRasterOptions {
 export interface CombinedExportLayer {
   id?: "structure" | MovableFigureLayerId;
   label?: string;
+  measurementText?: RasterExportMeasurementText;
   previewBlob?: Blob;
   image: RasterExportImage;
   textItems: RasterExportTextItem[];
@@ -113,7 +115,7 @@ export async function prepareCombinedExportLayers({
       visibleScene,
       separateMeasurementLabels: true,
     });
-    const structureLayers = structureExportLayers(structureImage);
+    const structureLayers = structureExportLayers(structureImage, settings.format === "pdf");
     structureBounds = structureImage.accessoryReferenceBounds ?? combinedContentBounds(structureLayers);
     const [structureLayer, ...labels] = structureLayers;
     layers.push(structureLayer!);
@@ -194,12 +196,25 @@ export async function prepareCombinedExportLayers({
 }
 
 /** Split only the supplied text payload; the structure raster is already label-free. */
-export function structureExportLayers(image: RasterExportImage): CombinedExportLayer[] {
+export function structureExportLayers(image: RasterExportImage, vectorText = false): CombinedExportLayer[] {
   const { measurementLabels, ...baseImage } = image;
   return [
     { id: "structure", image: measurementLabels ? baseImage : image, textItems: [], x: 0, y: 0 },
-    ...(measurementLabels ?? []).map(label => ({ id: `measurement:${label.id}` as const,
-      label: label.label, image: label.image, textItems: [], x: label.x, y: label.y })),
+    ...(measurementLabels ?? []).map(label => {
+      let image = label.image;
+      if (vectorText && label.text?.inkBounds) {
+        // Small raster labels can drop subpixel edge ink during downsampling.
+        // Include precise vector ink in PDF preview/export bounds, never shrink
+        // the established bitmap bounds or alter the PNG/JPG drawing path.
+        const ink = label.text.inkBounds;
+        const raster = image.contentBounds ?? fullLayerBounds(image.width, image.height);
+        const minX = Math.min(raster.minX, ink.minX), maxX = Math.max(raster.maxX, ink.maxX);
+        const minY = Math.min(raster.minY, ink.minY), maxY = Math.max(raster.maxY, ink.maxY);
+        image = { ...image, contentBounds: { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY } };
+      }
+      return { id: `measurement:${label.id}` as const, label: label.label, image,
+        measurementText: label.text, textItems: [], x: label.x, y: label.y };
+    }),
   ];
 }
 
@@ -316,7 +331,7 @@ export async function composeCombinedExportRaster(
     const y = layer.y + shiftY;
     if (settings.format === "pdf" && layer.id?.startsWith("measurement:")) {
       const id = layer.id.slice("measurement:".length);
-      measurementLabels.push({ id, label: layer.label ?? id, image: layer.image, x, y });
+      measurementLabels.push({ id, label: layer.label ?? id, image: layer.image, text: layer.measurementText, x, y });
       continue;
     }
     await drawRasterExportImage(context, layer.image, x, y);

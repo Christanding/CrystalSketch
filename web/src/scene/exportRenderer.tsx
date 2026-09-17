@@ -31,7 +31,7 @@ import {
 import { ExportSceneContent } from "./ExportSceneContent";
 import { MaterialPresetLights } from "./MaterialPresetLights";
 import { computeSceneLayout, type SceneLayout } from "./sceneLayout";
-import { createMeasurementLabelCanvas, displayedMeasurements, measurementLayoutObstacles } from "./MeasurementAnnotations";
+import { createMeasurementLabelCanvas, measurementLabelCanvasText, displayedMeasurements, measurementLayoutObstacles } from "./MeasurementAnnotations";
 import { DEFAULT_MEASUREMENT_STYLE } from "../model/measurements";
 import { layoutMeasurementLabels, measurementLabelSize, MEASUREMENT_LABEL_CENTER } from "../model/measurementLabelLayout";
 import { ensureFigureFonts } from "../theme/fonts";
@@ -72,9 +72,20 @@ export interface RasterExportMeasurementLabel {
   id: string;
   label: string;
   image: RasterExportImage;
+  text?: RasterExportMeasurementText;
   /** Top-left position on the final structure canvas, after supersampling. */
   x: number;
   y: number;
+}
+
+/** Canvas-matched glyph positions relative to a movable label, in output pixels. */
+export interface RasterExportMeasurementText {
+  color: string;
+  fontWeight: number;
+  fontSize: number;
+  baselineY: number;
+  inkBounds?: RasterExportBounds;
+  runs: { label: string; family: "numeral" | "text"; x: number; width: number; strokeWidth?: number }[];
 }
 
 export type RasterExportImageFormat = "jpg" | "png";
@@ -359,8 +370,10 @@ async function extractMeasurementLabelLayers({ scene, camera, layout, width, hei
     const pixelHeight = (topLeft.y - bottomRight.y) * height / 2;
     const layerWidth = Math.max(1, Math.ceil(pixelWidth));
     const layerHeight = Math.max(1, Math.ceil(pixelHeight));
-    const glyphs = createMeasurementLabelCanvas(measurement.label,
-      scene.measurementStyle?.color ?? unitCellLineColor ?? "#333333", scene.measurementStyle?.fontWeight ?? 400);
+    const color = scene.measurementStyle?.color ?? unitCellLineColor ?? "#333333";
+    const fontWeight = scene.measurementStyle?.fontWeight ?? 400;
+    const glyphs = createMeasurementLabelCanvas(measurement.label, color, fontWeight);
+    const text = measurementLabelCanvasText(glyphs, measurement.label, color, fontWeight, pixelWidth, pixelHeight);
     const canvas = document.createElement("canvas");
     canvas.width = layerWidth * supersampling;
     canvas.height = layerHeight * supersampling;
@@ -379,7 +392,7 @@ async function extractMeasurementLabelLayers({ scene, camera, layout, width, hei
         width: ink.maxX - ink.minX + 1, height: ink.maxY - ink.minY + 1 } : undefined;
       const blob = await canvasToRasterBlob(output, "png", null);
       signal?.throwIfAborted();
-      result.push({ id: measurement.definition.id, label: measurement.label, x, y,
+      result.push({ id: measurement.definition.id, label: measurement.label, x, y, text,
         image: { blob, width: layerWidth, height: layerHeight, contentBounds } });
     } finally {
       glyphs.width = glyphs.height = 1;

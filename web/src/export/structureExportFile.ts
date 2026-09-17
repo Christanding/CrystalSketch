@@ -56,7 +56,7 @@ export async function createStructureExportFile({
   });
   if (rasterImage.measurementLabels?.length) {
     rasterImage = await composeCombinedExportRaster({
-      layers: structureExportLayers(rasterImage), width: rasterImage.width, height: rasterImage.height,
+      layers: structureExportLayers(rasterImage, settings.format === "pdf"), width: rasterImage.width, height: rasterImage.height,
     }, { ...settings, previewLayout: structureOnlyFigureExportLayout(settings.previewLayout) });
   }
 

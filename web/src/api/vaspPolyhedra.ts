@@ -53,10 +53,12 @@ export function buildCoordinationPolyhedron(
   const hullAtomIndices = [centerAtomIndex, ...neighbors];
   if (hullAtomIndices.some(index => !atoms[index]?.position.every(Number.isFinite))) return null;
   const origin = new Vector3(...atoms[centerAtomIndex]!.position);
-  const points = hullAtomIndices.map(index => new Vector3(...atoms[index]!.position).sub(origin));
+  // Keep the center at index 0 for scene compatibility, but only ligands define
+  // the shell. An off-plane center must not give planar coordination a volume.
+  const points = [...neighbors].map(index => new Vector3(...atoms[index]!.position).sub(origin));
   if (!hasVolume(points)) return null;
   const hull = new ConvexHull().setFromPoints(points);
-  const indices = new Map(points.map((point, index) => [point, index]));
+  const indices = new Map(points.map((point, index) => [point, index + 1]));
   const faces: PolyhedronSpec["faces"] = hull.faces.map(face => {
     const edge = face.edge;
     return [indices.get(edge.head().point)!, indices.get(edge.next.head().point)!, indices.get(edge.next.next.head().point)!];

@@ -208,6 +208,26 @@ describe("combined export layout", () => {
     expect(cropped.bounds).toEqual({ minX: 20, minY: 20, maxX: 180, maxY: 140, width: 160, height: 120 });
   });
 
+  test("unions precise subpixel vector ink only for PDF without shrinking or changing raster label bounds", () => {
+    const rasterBounds = { minX: 10, minY: 10, maxX: 30, maxY: 30, width: 20, height: 20 };
+    const image: RasterExportImage = { ...measuredRasterImage(), measurementLabels: [{ id: "edge", label: "109.47°",
+      image: { ...rasterImage(40, 40), contentBounds: rasterBounds }, x: -10, y: -10,
+      text: { color: "#ff0000", fontWeight: 600, fontSize: 3.4, baselineY: 24, runs: [],
+        inkBounds: { minX: 9.95, minY: 10.25, maxX: 29.8, maxY: 30.08, width: 19.85, height: 19.83 } },
+    }] };
+    const rasterLayers = structureExportLayers(image);
+    const pdfLayers = structureExportLayers(image, true);
+    expect(rasterLayers[1]!.image).toBe(image.measurementLabels![0]!.image);
+    expect(rasterLayers[1]!.image.contentBounds).toBe(rasterBounds);
+    expect(pdfLayers[1]!.image.blob).toBe(rasterLayers[1]!.image.blob);
+    expect(pdfLayers[1]!.image.contentBounds).toEqual({ minX: 9.95, minY: 10, maxX: 30, maxY: 30.08, width: 20.05, height: 20.08 });
+    const layout = { ...defaultFigureExportLayout(), margins: { top: 0, right: 0, bottom: 0, left: 0 } };
+    const raster = layoutCombinedExport({ width: 200, height: 160, layers: rasterLayers }, layout);
+    const pdf = layoutCombinedExport({ width: 200, height: 160, layers: pdfLayers }, layout);
+    expect(raster.bounds).toEqual({ minX: 0, minY: 0, maxX: 180, maxY: 140, width: 180, height: 140 });
+    expect(pdf.bounds).toEqual({ minX: -1, minY: 0, maxX: 180, maxY: 140, width: 181, height: 140 });
+  });
+
   test("uses legacy reference bounds for accessory placement without retaining them in moved content bounds", async () => {
     const reference = { minX: 10, minY: 5, maxX: 190, maxY: 150, width: 180, height: 145 };
     const image: RasterExportImage = { ...measuredRasterImage(), accessoryReferenceBounds: reference };
@@ -311,6 +331,8 @@ describe("combined export layout", () => {
         { id: "angle-1", label: "109.47°", x: 170, y: 115 },
       ] });
       expect(pdf.measurementLabels![0]!.image).toBe(image.measurementLabels![0]!.image);
+      expect(pdf.measurementLabels![0]!.text).toBe(image.measurementLabels![0]!.text);
+      expect(pdf.textItems).toEqual([]);
       expect(drawImage).toHaveBeenCalledTimes(1);
       expect(drawImage.mock.calls[0]!.slice(1)).toEqual([70, 25, 200, 160]);
       drawImage.mockClear();
@@ -320,6 +342,18 @@ describe("combined export layout", () => {
       expect(drawImage.mock.calls.map(call => call.slice(1))).toEqual([
         [70, 25, 200, 160], [0, 0, 30, 12], [170, 115, 48, 14],
       ]);
+      const label = image.measurementLabels![0]!;
+      const withVectorInk = { ...image, measurementLabels: [{ ...label, text: { ...label.text!,
+        inkBounds: { minX: -.05, minY: .25, maxX: 29.8, maxY: 12.08, width: 29.85, height: 11.83 } } }] };
+      const vectorPrepared = { ...prepared, layers: structureExportLayers(withVectorInk, true) };
+      const vectorSettings = { ...settings, format: "pdf" as const,
+        previewLayout: { ...previewLayout, margins: { top: 0, right: 0, bottom: 0, left: 0 } } };
+      const preview = layoutCombinedExport(vectorPrepared, vectorSettings.previewLayout);
+      const output = await composeCombinedExportRaster(vectorPrepared, vectorSettings);
+      expect(output.width).toBe(preview.bounds.width);
+      expect(output.height).toBe(preview.bounds.height);
+      expect(output.measurementLabels![0]!.x).toBeCloseTo(preview.layers[1]!.x - preview.bounds.minX, 10);
+      expect(output.measurementLabels![0]!.x + label.text!.runs[0]!.x).toBeGreaterThanOrEqual(0);
     } finally {
       globalThis.createImageBitmap = originalBitmap;
       toBlob.mockRestore();
@@ -332,7 +366,9 @@ function measuredRasterImage(): RasterExportImage {
   return { ...rasterImage(200, 160),
     contentBounds: { minX: 20, minY: 20, maxX: 180, maxY: 140, width: 160, height: 120 },
     measurementLabels: [
-      { id: "distance-1", label: "2.450 Å", image: rasterImage(30, 12), x: 80, y: 75 },
+      { id: "distance-1", label: "2.450 Å", image: rasterImage(30, 12), x: 80, y: 75,
+        text: { color: "#9b2351", fontWeight: 600, fontSize: 7, baselineY: 8.25,
+          runs: [{ label: "2", family: "numeral", x: 4.5, width: 4.2 }] } },
       { id: "angle-1", label: "109.47°", image: rasterImage(48, 14), x: 100, y: 90 },
     ],
   };

@@ -345,3 +345,43 @@ export function createMeasurementLabelCanvas(label: string, color: string, fontW
   }
   return canvas;
 }
+
+/** Measure the existing sprite drawing without changing its pixels or guessing font baselines. */
+export function measurementLabelCanvasText(
+  canvas: HTMLCanvasElement, label: string, color: string, fontWeight: number, width: number, height: number,
+): import("./exportRenderer").RasterExportMeasurementText {
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Could not measure the measurement text export canvas.");
+  const middle = context.measureText(label);
+  context.textBaseline = "alphabetic";
+  const alphabetic = context.measureText(label);
+  const scaleX = width / canvas.width * Math.min(1, (canvas.width - 24) / alphabetic.width);
+  const scaleY = height / canvas.height;
+  const baselineY = (canvas.height / 2 + 3 + alphabetic.actualBoundingBoxAscent - middle.actualBoundingBoxAscent) * scaleY;
+  const minX = width / 2 - middle.actualBoundingBoxLeft * scaleX;
+  const maxX = width / 2 + middle.actualBoundingBoxRight * scaleX;
+  const minY = (canvas.height / 2 + 3 - middle.actualBoundingBoxAscent) * scaleY;
+  const maxY = (canvas.height / 2 + 3 + middle.actualBoundingBoxDescent) * scaleY;
+  const inkBounds = { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY };
+  let prefix = "";
+  const runs = (label.match(/[0-9]+|[^0-9]+/g) ?? []).map(value => {
+    const x = width / 2 + (context.measureText(prefix).width - alphabetic.width / 2) * scaleX;
+    prefix += value;
+    const metrics = context.measureText(value);
+    const family = /^[0-9]/.test(value) ? "numeral" as const : "text" as const;
+    let strokeWidth = 0;
+    if (family === "text" && fontWeight >= 600) {
+      // WenKai only supplies a 500 face. Measure this browser's synthetic bold
+      // expansion instead of assuming that every platform synthesizes equally.
+      const font = context.font;
+      context.font = `500 ${LABEL_FONT_SIZE}px ${FIGURE_FONT_FAMILY}`;
+      const regular = context.measureText(value);
+      context.font = font;
+      strokeWidth = Math.max(0, metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight
+        - regular.actualBoundingBoxLeft - regular.actualBoundingBoxRight) * scaleY;
+    }
+    return { label: value, family, x, width: metrics.width * scaleX, ...(strokeWidth > 0 ? { strokeWidth } : {}) };
+  });
+  context.textBaseline = "middle";
+  return { color, fontWeight, fontSize: LABEL_FONT_SIZE * scaleY, baselineY, inkBounds, runs };
+}

@@ -34,6 +34,7 @@ export interface PolyhedronDisplayResult {
 /** Prepare geometry from the raw scene after deletions, before visibility filters. */
 export function preparePolyhedronDisplay(scene: SceneSpec, state: PolyhedronDisplayState): PolyhedronDisplayResult {
   if (state.mode === "auto") {
+    scene = repairLegacyPolyhedronShells(scene);
     return { scene, requested: scene.polyhedra.length, generated: scene.polyhedra.length, issues: [] };
   }
   const centerAtomIds = [...new Set(state.centerAtomIds)];
@@ -59,7 +60,8 @@ export function preparePolyhedronDisplay(scene: SceneSpec, state: PolyhedronDisp
       const existing = existingAtoms === scene.atoms ? existingByCenter.get(centerAtomId) : undefined;
       const existingNeighbors = new Set(existing?.hullAtomIndices.filter(index => index !== centerAtomIndex));
       const reusable = existing && existingNeighbors.size === neighborCount
-        && [...neighborIndices].every(index => existingNeighbors.has(index));
+        && [...neighborIndices].every(index => existingNeighbors.has(index))
+        && existing.faces.every(face => face.every(index => existing.hullAtomIndices[index] !== centerAtomIndex));
       const polyhedron = reusable ? existing : buildCoordinationPolyhedron(scene.atoms, centerAtomIndex, neighborIndices);
       if (polyhedron) polyhedra.push(polyhedron);
       else reason = "degenerate";
@@ -70,12 +72,28 @@ export function preparePolyhedronDisplay(scene: SceneSpec, state: PolyhedronDisp
     requested: centerAtomIds.length, generated: polyhedra.length, issues };
 }
 
+/** Old saved scenes may contain faces that incorrectly use the center as a vertex. */
+function repairLegacyPolyhedronShells(scene: SceneSpec): SceneSpec {
+  const atoms = scene.polyhedronAtoms ?? scene.atoms;
+  let changed = false;
+  const polyhedra = scene.polyhedra.flatMap(polyhedron => {
+    if (!polyhedron.faces.some(face => face.some(index => polyhedron.hullAtomIndices[index] === polyhedron.centerAtomIndex))) {
+      return [polyhedron];
+    }
+    changed = true;
+    const repaired = buildCoordinationPolyhedron(atoms, polyhedron.centerAtomIndex, polyhedron.hullAtomIndices);
+    return repaired ? [{ ...polyhedron, hullAtomIndices: repaired.hullAtomIndices, faces: repaired.faces }] : [];
+  });
+  return changed ? { ...scene, polyhedra } : scene;
+}
+
 export type AutoPolyhedronAvailability = "available" | "deferred" | "no-bonds"
   | "insufficient-coordination" | "automatic-center-filter" | "degenerate-or-unavailable";
 
 /** Describe only causes supported by the current graph and its known generator. */
 export function classifyAutoPolyhedronAvailability(scene: SceneSpec): AutoPolyhedronAvailability {
   if (scene.connectivity === "deferred") return "deferred";
+  scene = repairLegacyPolyhedronShells(scene);
   if (scene.polyhedra.length > 0) return "available";
   if (scene.bonds.length === 0) return "no-bonds";
   const neighbors = coordinationNeighbors(scene);

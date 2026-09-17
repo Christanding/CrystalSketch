@@ -13,7 +13,13 @@ import {
 // browsers use the smaller WOFF2 of the same WenKai subset. Glyph records in
 // this WOFF are 4-byte aligned, avoiding fontkit's short-loca rounding bug.
 const WENKAI_PDF_FONT_URL = new URL("../assets/fonts/LXGWWenKai-UI.woff", import.meta.url).href;
-const NUMERAL_PDF_FONT_URL = new URL("../../node_modules/@fontsource/geist-mono/files/geist-mono-latin-400-normal.woff", import.meta.url).href;
+const NUMERAL_PDF_FONT_URLS: Record<number, string> = {
+  300: new URL("../../node_modules/@fontsource/geist-mono/files/geist-mono-latin-300-normal.woff", import.meta.url).href,
+  400: new URL("../../node_modules/@fontsource/geist-mono/files/geist-mono-latin-400-normal.woff", import.meta.url).href,
+  500: new URL("../../node_modules/@fontsource/geist-mono/files/geist-mono-latin-500-normal.woff", import.meta.url).href,
+  600: new URL("../../node_modules/@fontsource/geist-mono/files/geist-mono-latin-600-normal.woff", import.meta.url).href,
+};
+const pdfFonts = new WeakMap<PDFDocument, Map<string, Promise<PDFFont>>>();
 
 export async function encodeRasterTextPdf(
   rasterImage: RasterExportImage,
@@ -104,7 +110,39 @@ export async function encodeRasterPdf(rasterImage: RasterExportImage, dpi: numbe
 }
 
 async function drawMeasurementLabelLayers(pdf: PDFDocument, page: PDFPage, rasterImage: RasterExportImage): Promise<void> {
+  const { concatTransformationMatrix, pushGraphicsState, popGraphicsState, rgb,
+    setLineWidth, setStrokingRgbColor, setTextRenderingMode, TextRenderingMode } = await import("pdf-lib");
   for (const layer of rasterImage.measurementLabels ?? []) {
+    if (layer.text) {
+      const text = layer.text;
+      const color = rgb(...hexColorToRgbComponents(text.color));
+      const [textFont, numeralFont] = await Promise.all([
+        embedPdfFont(pdf, WENKAI_PDF_FONT_URL),
+        embedPdfFont(pdf, NUMERAL_PDF_FONT_URLS[text.fontWeight] ?? NUMERAL_PDF_FONT_URLS[400]!),
+      ]);
+      for (const run of text.runs) {
+        const font = run.family === "numeral" ? numeralFont : textFont;
+        const advance = font.widthOfTextAtSize(run.label, text.fontSize);
+        if (!(advance > 0)) continue;
+        // Canvas and PDF shaping have different metrics. Keep the browser's
+        // measured run starts/advances and alphabetic baseline, including the
+        // canvas maxWidth squeeze and fractional sprite projection.
+        page.pushOperators(pushGraphicsState(), concatTransformationMatrix(
+          run.width / advance, 0, 0, 1, layer.x + run.x, rasterImage.height - layer.y - text.baselineY,
+        ));
+        if (run.strokeWidth) {
+          // Match the measured browser synthetic-bold expansion for WenKai,
+          // without changing the genuine Geist digit outlines.
+          page.pushOperators(setLineWidth(run.strokeWidth),
+            setStrokingRgbColor(...hexColorToRgbComponents(text.color)),
+            setTextRenderingMode(TextRenderingMode.FillAndOutline));
+        }
+        page.drawText(run.label, { font, size: text.fontSize, color, x: 0, y: 0 });
+        page.pushOperators(popGraphicsState());
+      }
+      continue;
+    }
+    // Accept older callers that only carry a bitmap; new exports include text.
     const image = await pdf.embedPng(new Uint8Array(await layer.image.blob.arrayBuffer()));
     page.drawImage(image, {
       width: layer.image.width,
@@ -121,18 +159,30 @@ function pdfPointScale(dpi: number): number {
 }
 
 async function embedPdfTextFonts(pdf: PDFDocument): Promise<{ textFont: PDFFont; numeralFont: PDFFont }> {
-  type PdfFontkit = Parameters<PDFDocument["registerFontkit"]>[0];
-  type PdfFontkitModule = typeof import("@pdf-lib/fontkit") & { default?: PdfFontkit };
-  const fontkitModule = (await import("@pdf-lib/fontkit")) as PdfFontkitModule;
-  pdf.registerFontkit(fontkitModule.default ?? fontkitModule);
-  const [textBytes, numeralBytes] = await Promise.all([
-    fetchFontBytes(WENKAI_PDF_FONT_URL),
-    fetchFontBytes(NUMERAL_PDF_FONT_URL),
+  const [textFont, numeralFont] = await Promise.all([
+    embedPdfFont(pdf, WENKAI_PDF_FONT_URL),
+    embedPdfFont(pdf, NUMERAL_PDF_FONT_URLS[400]!),
   ]);
-  return {
-    textFont: await pdf.embedFont(textBytes, { subset: true }),
-    numeralFont: await pdf.embedFont(numeralBytes, { subset: true }),
-  };
+  return { textFont, numeralFont };
+}
+
+function embedPdfFont(pdf: PDFDocument, url: string): Promise<PDFFont> {
+  let fonts = pdfFonts.get(pdf);
+  if (!fonts) { fonts = new Map(); pdfFonts.set(pdf, fonts); }
+  let font = fonts.get(url);
+  if (!font) {
+    font = (async () => {
+      type PdfFontkit = Parameters<PDFDocument["registerFontkit"]>[0];
+      type PdfFontkitModule = typeof import("@pdf-lib/fontkit") & { default?: PdfFontkit };
+      const [fontkitModule, bytes] = await Promise.all([
+        import("@pdf-lib/fontkit") as Promise<PdfFontkitModule>, fetchFontBytes(url),
+      ]);
+      pdf.registerFontkit(fontkitModule.default ?? fontkitModule);
+      return pdf.embedFont(bytes, { subset: true });
+    })();
+    fonts.set(url, font);
+  }
+  return font;
 }
 
 async function fetchFontBytes(url: string): Promise<Uint8Array> {

@@ -175,9 +175,96 @@ describe("figure preview editing", () => {
       expect(screen.queryByTestId("figure-preview-image")).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "structure.pdf" }));
       expect(screen.getByRole("button", { name: i18n.t("figurePreview.moveMeasurement", { label: "90.00°" }) })).toBeTruthy();
+      const undo = screen.getByRole("button", { name: i18n.t("figurePreview.undo") }) as HTMLButtonElement;
+      expect(undo.disabled).toBe(false);
+      fireEvent.click(undo);
+      expect(readLayout().measurementLabels).toEqual({ ...initialLayout.measurementLabels, angle: { x: .05, y: 0 } });
+      expect(readLayout().margins).toEqual(initialLayout.margins);
     } finally { createUrl.mockRestore(); revokeUrl.mockRestore(); }
   });
+
+  test("records an entire drag as one undo step, supports both redo shortcuts and clears redo on a new edit", () => {
+    render(<PreviewHarness previewContent={labeledContent} />);
+    const label = prepareLabelDrag();
+    const undo = screen.getByRole("button", { name: i18n.t("figurePreview.undo") }) as HTMLButtonElement;
+    expect(undo.disabled).toBe(true);
+    fireEvent.pointerDown(label, { button: 0, pointerId: 1, clientX: 60, clientY: 20 });
+    for (const dx of [10, 20, 30, 40]) fireEvent.pointerMove(label, { pointerId: 1, clientX: 60 + dx, clientY: 40 });
+    expect(screen.getByTestId("saved-preview-layout").textContent).toBe("null");
+    fireEvent.pointerUp(label, { pointerId: 1 });
+    const moved = readLayout();
+    expect(moved.measurementLabels!.distance).toEqual({ x: .2, y: .125 });
+    fireEvent.keyDown(label, { key: "z", metaKey: true });
+    expect(screen.getByTestId("saved-preview-layout").textContent).toBe("null");
+    expect(undo.disabled).toBe(true);
+    fireEvent.keyDown(label, { key: "Z", metaKey: true, shiftKey: true });
+    expect(readLayout()).toEqual(moved);
+    fireEvent.click(undo);
+    expect(document.activeElement).toBe(label);
+    fireEvent.keyDown(label, { key: "y", ctrlKey: true });
+    expect(readLayout()).toEqual(moved);
+    fireEvent.click(undo);
+    fireEvent.keyDown(label, { key: "ArrowDown" });
+    expect((screen.getByRole("button", { name: i18n.t("figurePreview.redo") }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  test("Escape rolls back only the in-progress drag without closing preview or consuming an earlier undo", async () => {
+    render(<PreviewHarness previewContent={labeledContent} />);
+    const label = prepareLabelDrag();
+    fireEvent.keyDown(label, { key: "ArrowRight", shiftKey: true });
+    const before = readLayout();
+    const beforePosition = label.parentElement!.style.left;
+    fireEvent.pointerDown(label, { button: 0, pointerId: 2, clientX: 60, clientY: 20 });
+    fireEvent.pointerMove(label, { pointerId: 2, clientX: 90, clientY: 70 });
+    expect(label.parentElement!.style.left).not.toBe(beforePosition);
+    expect(readLayout()).toEqual(before);
+    fireEvent.keyDown(label, { key: "Escape" });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(readLayout()).toEqual(before);
+    expect(label.parentElement!.style.left).toBe(beforePosition);
+    fireEvent.pointerUp(label, { pointerId: 2 });
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("figurePreview.undo") }));
+    expect(screen.getByTestId("saved-preview-layout").textContent).toBe("null");
+    fireEvent.keyDown(label, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  });
+
+  test("pointer cancellation and lost capture restore the starting layout without adding undo", () => {
+    render(<PreviewHarness previewContent={labeledContent} />);
+    const label = prepareLabelDrag();
+    for (const interrupt of [fireEvent.pointerCancel, fireEvent.lostPointerCapture]) {
+      fireEvent.pointerDown(label, { button: 0, pointerId: 3, clientX: 60, clientY: 20 });
+      fireEvent.pointerMove(label, { pointerId: 3, clientX: 95, clientY: 70 });
+      interrupt(label, { pointerId: 3 });
+      expect(screen.getByTestId("saved-preview-layout").textContent).toBe("null");
+      expect((screen.getByRole("button", { name: i18n.t("figurePreview.undo") }) as HTMLButtonElement).disabled).toBe(true);
+    }
+  });
+
+  test("single-label reset preserves other labels, accessories and margins, and is itself undoable", () => {
+    const initialLayout: FigureExportLayout = { legend: { x: .2, y: .3 }, crystalAxes: { x: .4, y: .1 },
+      margins: { top: .1, right: .1, bottom: .1, left: .1 },
+      measurementLabels: { distance: { x: .2, y: .1 }, angle: { x: -.1, y: .3 } } };
+    render(<PreviewHarness previewContent={labeledContent} initialLayout={initialLayout} />);
+    const label = screen.getByRole("button", { name: i18n.t("figurePreview.moveMeasurement", { label: "2.500 Å" }) });
+    fireEvent.focus(label);
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("figurePreview.resetSelected", { label: "2.500 Å" }) }));
+    expect(document.activeElement).toBe(label);
+    expect(readLayout()).toEqual({ ...initialLayout, measurementLabels: { ...initialLayout.measurementLabels, distance: { x: 0, y: 0 } } });
+    fireEvent.click(screen.getByRole("button", { name: i18n.t("figurePreview.undo") }));
+    expect(readLayout()).toEqual(initialLayout);
+    const margin = screen.getByRole("spinbutton", { name: i18n.t("figurePreview.marginSide", { side: i18n.t("figurePreview.top") }) });
+    fireEvent.keyDown(margin, { key: "z", ctrlKey: true });
+    expect(readLayout()).toEqual(initialLayout);
+  });
 });
+
+function prepareLabelDrag() {
+  screen.getByTestId("figure-preview-image").getBoundingClientRect = () => ({ width: 200, height: 160 } as DOMRect);
+  const label = screen.getByRole("button", { name: i18n.t("figurePreview.moveMeasurement", { label: "2.500 Å" }) });
+  label.setPointerCapture = () => {};
+  return label;
+}
 
 function PreviewHarness({ previewContent = content, initialLayout }: { previewContent?: FigurePreviewContent; initialLayout?: FigureExportLayout }) {
   const [open, setOpen] = useState(true);

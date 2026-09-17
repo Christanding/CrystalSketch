@@ -1752,7 +1752,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Cu #1" }));
     await user.click(within(controls).getByRole("tab", { name: "Display" }));
     const requestsBeforeGeneration = fetchCalls.length;
-    await user.click(screen.getByRole("button", { name: "Use selected atoms" }));
+    await user.click(screen.getByRole("button", { name: "Generate around Cu:1" }));
     expect(polyhedra().disabled).toBe(false);
     expect(polyhedra().getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText("Centers: 1 · Polyhedra generated: 1")).toBeTruthy();
@@ -1772,6 +1772,36 @@ describe("App", () => {
     expect(polyhedra().disabled).toBe(false);
     expect(screen.getByRole("button", { name: "Use selected atoms" }).getAttribute("aria-pressed")).toBe("true");
     expect(fetchCalls).toHaveLength(requestsBeforeGeneration);
+  });
+
+  test("names the selected sulfur center and distinguishes a later selection from the pinned polyhedron", async () => {
+    const user = userEvent.setup();
+    const scene = parseVaspScene("Cu4S\n1\n10 0 0\n0 10 0\n0 0 10\nCu S\n4 1\nDirect\n.6 .6 .6\n.4 .4 .6\n.4 .6 .4\n.6 .4 .4\n.5 .5 .5");
+    scene.atoms.find(atom => atom.element === "S")!.sourceAtomNumber = 17;
+    await renderLoadedStructure(user, scene);
+    const controls = screen.getByRole("complementary", { name: "Common controls" });
+    const choose = async (number: string, label: string) => {
+      await user.click(within(controls).getByRole("tab", { name: "Measure" }));
+      const input = screen.getByRole("textbox", { name: "Atom number" });
+      await user.clear(input);
+      await user.type(input, number);
+      await user.click(screen.getByRole("button", { name: "Find" }));
+      await user.click(screen.getByRole("button", { name: label }));
+      await user.click(within(controls).getByRole("tab", { name: "Display" }));
+    };
+    await choose("17", "S #17");
+    expect(screen.getByText("Current selection: S:17")).toBeTruthy();
+    expect(screen.getByText("Current mode: Automatic all")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Generate around S:17" }));
+    expect(screen.getByText("Current mode: Specified centers")).toBeTruthy();
+    expect(screen.getByText("Current center: S:17 · Coordination number: 4")).toBeTruthy();
+    await choose("1", "Cu #1");
+    expect(screen.getByText("Current selection: Cu:1")).toBeTruthy();
+    expect(screen.getByText("Selection changed; generate again to apply it. Existing centers are unchanged.")).toBeTruthy();
+    expect(screen.getByText("Current center: S:17 · Coordination number: 4")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Generate around Cu:1" }));
+    expect(screen.queryByText("Current center: S:17 · Coordination number: 4")).toBeNull();
+    expect(screen.queryByText("Selection changed; generate again to apply it. Existing centers are unchanged.")).toBeNull();
   });
 
   test("accepts 25 percent measurement text in both controls and the export scene", async () => {
@@ -1806,7 +1836,7 @@ describe("App", () => {
     await user.click(screen.getByRole("button", { name: "Cu #1" }));
     await user.click(within(controls).getByRole("tab", { name: "Display" }));
     const requestsBeforeGeneration = fetchCalls.length;
-    await user.click(screen.getByRole("button", { name: "Use selected atoms" }));
+    await user.click(screen.getByRole("button", { name: "Generate around Cu:1" }));
     expect(screen.getByText(/neighbor count is 1; at least four are required/)).toBeTruthy();
     expect((within(controls).getByRole("checkbox", { name: "Polyhedra" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("Centers: 1 · Polyhedra generated: 0")).toBeTruthy();

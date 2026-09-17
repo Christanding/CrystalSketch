@@ -7,7 +7,7 @@ import { createDefaultComponentOpacity, createDefaultComponentVisibility, create
   createDefaultStyle, DEFAULT_STRUCTURE_LINE_WIDTH } from "../src/model";
 import { DEFAULT_MEASUREMENT_STYLE } from "../src/model/measurements";
 import { layoutMeasurementLabels, measurementLabelSize } from "../src/model/measurementLabelLayout";
-import { createMeasurementLabelCanvas, displayedMeasurements, measurementAngleArcPositions,
+import { createMeasurementLabelCanvas, measurementLabelCanvasText, displayedMeasurements, measurementAngleArcPositions,
   measurementLayoutObstacles } from "../src/scene/MeasurementAnnotations";
 import { applyCameraPoseSnapshot, createCameraPoseSnapshot } from "../src/scene/cameraPose";
 import { applyOrthographicExportFrame, computeStructureExportFramePlan, computeStructureProjectedBounds } from "../src/scene/exportFrame";
@@ -45,7 +45,14 @@ function rendererHarness() {
     const cached = contexts.get(this);
     if (cached) return cached;
     const canvas = this;
-    const context = { font: "", fillStyle: "", fillRect() {}, drawImage() {},
+    const context = { font: "", fillStyle: "", textBaseline: "alphabetic", fillRect() {}, drawImage() {},
+      measureText(label: string) {
+        return { width: [...label].reduce((width, char) => width + (/\d/.test(char) ? 33.6 : char === "Å" ? 38.64 : 19.6), 0),
+          actualBoundingBoxAscent: context.textBaseline === "alphabetic" ? 51.24 : 20,
+          actualBoundingBoxDescent: context.textBaseline === "alphabetic" ? 1.12 : 32.36,
+          actualBoundingBoxLeft: context.font.startsWith("600 ") ? .875 : 0,
+          actualBoundingBoxRight: 20 + (context.font.startsWith("600 ") ? .875 : 0) };
+      },
       fillText(label: string, x: number, y: number, maxWidth: number) {
         glyphs.push({ label, x, y, maxWidth, font: context.font, color: String(context.fillStyle), width: canvas.width, height: canvas.height });
       },
@@ -102,6 +109,35 @@ describe("separate measurement text export", () => {
     } finally { harness.restore(); }
   });
 
+  test("carries the measured alphabetic baseline and mixed font runs at fractional output scale", () => {
+    const harness = rendererHarness();
+    try {
+      const canvas = createMeasurementLabelCanvas("2.000 Å", "#ad2345", 600);
+      const text = measurementLabelCanvasText(canvas, "2.000 Å", "#ad2345", 600, 26.5, 5.5);
+      expect(text).toMatchObject({ color: "#ad2345", fontWeight: 600, fontSize: 3.5 });
+      expect(text.baselineY).toBeCloseTo((47 + 51.24 - 20) / 16, 10);
+      expect(text.inkBounds).toEqual({ minX: 13.1953125, maxX: 14.5546875, minY: 1.6875,
+        maxY: 4.96, width: 1.359375, height: 3.2725 });
+      expect(text.runs.map(run => [run.label, run.family])).toEqual([
+        ["2", "numeral"], [".", "text"], ["000", "numeral"], [" Å", "text"],
+      ]);
+      const width = (4 * 33.6 + 2 * 19.6 + 38.64) / 16;
+      expect(text.runs[0]!.x).toBeCloseTo(26.5 / 2 - width / 2, 10);
+      expect(text.runs[1]!.x).toBeCloseTo(text.runs[0]!.x + 33.6 / 16, 10);
+      expect(text.runs[1]!.strokeWidth).toBeCloseTo(1.75 / 16, 10);
+      expect(text.runs[0]!.strokeWidth).toBeUndefined();
+      expect(text.runs.reduce((sum, run) => sum + run.width, 0)).toBeCloseTo(width, 10);
+      expect(canvas.getContext("2d")!.textBaseline).toBe("middle");
+      // Overflow is squeezed horizontally by fillText(maxWidth), not vertically.
+      const long = "1234567890".repeat(3);
+      const squeezedCanvas = createMeasurementLabelCanvas(long, "#333333", 300);
+      const squeezed = measurementLabelCanvasText(squeezedCanvas, long, "#333333", 300, 64, 11);
+      expect(squeezed.fontSize).toBe(7);
+      expect(squeezed.runs[0]!.x).toBeCloseTo(1.5, 10);
+      expect(squeezed.runs[0]!.width).toBeCloseTo(61, 10);
+    } finally { harness.restore(); }
+  });
+
   test("projects movable layers from the actual export camera and retains the original framing at 1x and 2x", async () => {
     const harness = rendererHarness();
     const options = fixture();
@@ -142,6 +178,9 @@ describe("separate measurement text export", () => {
           expect(layer.image.width).toBe(Math.ceil(pxWidth));
           expect(layer.image.height).toBe(Math.ceil(pxHeight));
           expect(layer.image.blob.type).toBe("image/png");
+          expect(layer.text).toMatchObject({ color: "#9b2351", fontWeight: 600 });
+          expect(layer.text!.fontSize).toBeCloseTo(56 * pxHeight / 88, 10);
+          expect(layer.text!.baselineY).toBeCloseTo((47 + 51.24 - 20) * pxHeight / 88, 10);
           const ink = layer.image.contentBounds!;
           expect(ink.minX).toBe(Math.floor(layer.image.width / 4));
           expect(ink.maxX).toBe(Math.ceil(layer.image.width * .75));

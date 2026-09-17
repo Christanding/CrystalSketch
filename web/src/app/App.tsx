@@ -925,7 +925,8 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
               hasPolyhedra={(appearance.polyhedronResult?.generated ?? 0) > 0}
               polyhedronElements={polyhedronElements}
               polyhedronControls={{
-                state: appearance.polyhedronDisplay, selectedAtomCount: interaction.selection.atoms.size,
+                state: appearance.polyhedronDisplay, selectedAtomIds: interaction.selection.atoms,
+                scene: appearance.geometryScene,
                 requested: appearance.polyhedronResult?.requested ?? 0,
                 generated: appearance.polyhedronResult?.generated ?? 0,
                 visible: visibleScene?.polyhedra.length ?? 0,

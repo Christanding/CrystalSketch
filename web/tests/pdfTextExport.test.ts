@@ -5,6 +5,7 @@ import fontkit from "@pdf-lib/fontkit";
 import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream } from "pdf-lib";
 import { encodeRasterPdf, encodeRasterTextPdf } from "../src/export/pdfTextExport";
 import { EXPORT_DPI_OPTIONS } from "../src/model/exportSettings";
+import type { RasterExportImage } from "../src/scene/exportRenderer";
 
 test("embeds WenKai text and Geist Mono digits in the exported PDF", async () => {
   const originalFetch = globalThis.fetch;
@@ -97,6 +98,71 @@ test("places standalone measurement rasters after the base with exact shifted co
     expect(drawing).toContain("140 0 0 28 0 0 cm");
     expect(drawing).toContain("60 0 0 18 0 0 cm");
   }
+});
+
+test.each([300, 400, 500, 600])("embeds %s-weight measurements as colored vector text above accessories with exact measured positions", async weight => {
+  const originalFetch = globalThis.fetch;
+  const fetched: string[] = [];
+  globalThis.fetch = (async (input: string | URL | Request) => {
+    fetched.push(String(input));
+    return new Response(await readFile(new URL(String(input))));
+  }) as typeof fetch;
+  try {
+    const raster: RasterExportImage = { ...rasterImage(1200, 600),
+      textItems: [{ label: "Cu 2", size: 12, x: 15, y: 50 }],
+      measurementLabels: [{ id: "distance", label: "2.450 Å", image: rasterImage(26, 6), x: 23.5, y: 17.25,
+        text: { color: "#ff3300", fontWeight: weight, fontSize: 3.5, baselineY: 4.125,
+          runs: [{ label: "2", family: "numeral", x: 4.5, width: 2.1 },
+            { label: ".", family: "text", x: 6.6, width: 1.225, ...(weight === 600 ? { strokeWidth: .109375 } : {}) },
+            { label: "450", family: "numeral", x: 7.825, width: 6.3 },
+            { label: " Å", family: "text", x: 14.125, width: 3.64, ...(weight === 600 ? { strokeWidth: .109375 } : {}) }] } },
+      { id: "angle", label: "90.00°", image: rasterImage(26, 6), x: 1100.25, y: 500.5,
+        text: { color: "#ff3300", fontWeight: weight, fontSize: 3.5, baselineY: 4.125,
+          runs: [{ label: "90", family: "numeral", x: 2.25, width: 4.2 },
+            { label: ".", family: "text", x: 6.45, width: 1.225 },
+            { label: "00", family: "numeral", x: 7.675, width: 4.2 },
+            { label: "°", family: "text", x: 11.875, width: 1.12 }] } }],
+    };
+    for (const combined of [false, true]) {
+      fetched.length = 0;
+      const dpi = combined ? 1200 : 300;
+      const blob = combined ? await encodeRasterTextPdf(raster, { background: "white", halo: false, dpi }) : await encodeRasterPdf(raster, dpi);
+      const pdf = await PDFDocument.load(await blob.arrayBuffer());
+      const page = pdf.getPage(0);
+      expect(page.getWidth()).toBeCloseTo(1200 * 72 / dpi, 10);
+      const streams = page.node.lookup(PDFName.of("Contents"), PDFArray);
+      const drawing = inflateSync(streams.lookup(1, PDFRawStream).contents).toString();
+      // Only the base structure remains an image. Text is not a second bitmap.
+      expect([...drawing.matchAll(/\/[^\s]+ Do/g)]).toHaveLength(1);
+      expect(drawing).toContain("28 578.625 cm");
+      expect(drawing).toContain("1102.5 95.375 cm");
+      expect(drawing).toContain("1 0.2 0 rg");
+      expect(drawing.includes("2 Tr")).toBe(weight === 600);
+      if (weight === 600) expect(drawing).toContain("0.109375 w");
+      const vectorStart = drawing.indexOf("28 578.625 cm");
+      expect(vectorStart).toBeGreaterThan(drawing.indexOf("1200 0 0 600 0 0 cm"));
+      if (combined) expect(vectorStart).toBeGreaterThan(drawing.indexOf("12 Tf"));
+      const fonts = page.node.Resources()!.lookup(PDFName.of("Font"), PDFDict);
+      const fontNames = fonts.entries().map(([, reference]) => pdf.context.lookup(reference, PDFDict)
+        .lookup(PDFName.of("BaseFont"), PDFName).asString());
+      const numeralName = { 300: "Light", 400: "Regular", 500: "Medium", 600: "SemiBold" }[weight];
+      expect(fontNames.some(name => name.includes(`GeistMono-${numeralName}`))).toBe(true);
+      expect(fontNames.some(name => name.includes("LXGWWenKai-Medium"))).toBe(true);
+      // Repeated layers reuse embedded fonts; unrelated weights are never loaded.
+      expect(fetched.filter(url => url.includes("LXGWWenKai"))).toHaveLength(1);
+      expect(fetched.filter(url => url.includes(`latin-${weight}-`))).toHaveLength(1);
+      expect(fetched).toHaveLength(combined && weight !== 400 ? 3 : 2);
+      const unicodeMappings = fonts.entries().map(([, reference]) => {
+        const font = pdf.context.lookup(reference, PDFDict);
+        const mapping = font.lookup(PDFName.of("ToUnicode"));
+        if (!(mapping instanceof PDFRawStream)) throw new Error("Expected an embedded Unicode mapping.");
+        return inflateSync(mapping.contents).toString();
+      }).join("\n");
+      expect(unicodeMappings).toContain("<00C5>");
+      expect(unicodeMappings).toContain("<00B0>");
+      expect(unicodeMappings).toContain("<0032>");
+    }
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 function rasterImage(width: number, height: number) {
