@@ -57,6 +57,7 @@ import { BatchedAtoms } from "../src/scene/BatchedAtoms";
 import { BatchedBonds } from "../src/scene/BatchedBonds";
 import { bondBatchPopulationKey } from "../src/scene/BatchedBonds";
 import { createAtomRenderItems } from "../src/scene/AtomRenderItems";
+import { equivalentSiteRenderItems, renderEquivalentSiteOverlay } from "../src/scene/EquivalentSiteOverlay";
 import { createBondRenderItems } from "../src/scene/BondRenderItems";
 import {
   createBatchPickRegistry,
@@ -454,6 +455,89 @@ describe("computeSceneLayout", () => {
     expect(itemForBatchId(registry, 0)).toBe(item);
     expect(itemForBatchId(registry, undefined)).toBeNull();
     expect(registry.batchIdByItemId.get("Si-0")).toBe(0);
+  });
+
+  test("marks only visible equivalent sites and leaves editing selection and structure untouched", () => {
+    const scene = sceneWithExportVisibilityAtoms();
+    scene.atoms[1]!.siteId = scene.atoms[0]!.siteId;
+    const style = createDefaultStyle();
+    style.objectStyles = setAtomOverrideProperty(style.objectStyles, scene.atoms[0]!.id, "radius", 1.25);
+    const originalScene = structuredClone(scene);
+    const originalStyle = structuredClone(style);
+    const siteIds = new Set([scene.atoms[0]!.siteId, "not-in-visible-scene"]);
+    const options = { atomOpacity: 60, inspectedAtomId: null, scene, showAtoms: true, siteIds, style };
+    const items = equivalentSiteRenderItems(options);
+    expect(items.map(item => item.id)).toEqual(scene.atoms.slice(0, 2).map(atom => atom.id));
+    expect(items[0]!.radius).toBe(1.25);
+    expect(items[0]!.opacity).toBe(0.6);
+    expect(items[1]!.atom.isPeriodicImage).toBe(true);
+    const selectedAtomIds = new Set([scene.atoms[0]!.id]);
+    expect(equivalentSiteRenderItems({ ...options, selectedAtomIds }).map(item => item.id))
+      .toEqual([scene.atoms[1]!.id]);
+    expect(equivalentSiteRenderItems({ ...options, inspectedAtomId: scene.atoms[1]!.id }).map(item => item.id))
+      .toEqual([scene.atoms[0]!.id]);
+    expect(equivalentSiteRenderItems({ ...options, showAtoms: false })).toEqual([]);
+    expect(equivalentSiteRenderItems({ ...options, atomOpacity: 0 })).toEqual([]);
+    expect(equivalentSiteRenderItems({ ...options, siteIds: new Set() })).toEqual([]);
+    const hiddenStyle = { ...style, objectStyles: setAtomOverrideProperty(style.objectStyles, scene.atoms[0]!.siteId, "visible", false) };
+    expect(equivalentSiteRenderItems({ ...options, style: hiddenStyle })).toEqual([]);
+    expect(equivalentSiteRenderItems({ ...options, scene: { ...scene, atoms: [scene.atoms[0]!] } }).map(item => item.id))
+      .toEqual([scene.atoms[0]!.id]);
+    expect(scene).toEqual(originalScene);
+    expect(style).toEqual(originalStyle);
+    expect([...selectedAtomIds]).toEqual([scene.atoms[0]!.id]);
+    expect(siteIds.size).toBe(2);
+  });
+
+  test("composites analysis markers without clearing the existing frame or changing renderer state", () => {
+    const overlay = new Scene();
+    const camera = new OrthographicCamera();
+    let throwOnRender = false;
+    let renders = 0;
+    const renderer = {
+      autoClear: true,
+      render(scene: Scene, activeCamera: OrthographicCamera) {
+        expect(this.autoClear).toBe(false);
+        expect(scene).toBe(overlay);
+        expect(activeCamera).toBe(camera);
+        renders++;
+        if (throwOnRender) throw new Error("overlay render failed");
+      },
+    };
+    renderEquivalentSiteOverlay(renderer as unknown as Parameters<typeof renderEquivalentSiteOverlay>[0], overlay, camera);
+    expect(renderer.autoClear).toBe(true);
+    renderer.autoClear = false;
+    renderEquivalentSiteOverlay(renderer as unknown as Parameters<typeof renderEquivalentSiteOverlay>[0], overlay, camera);
+    expect(renderer.autoClear).toBe(false);
+    renderer.autoClear = true;
+    throwOnRender = true;
+    expect(() => renderEquivalentSiteOverlay(renderer as unknown as Parameters<typeof renderEquivalentSiteOverlay>[0], overlay, camera))
+      .toThrow("overlay render failed");
+    expect(renderer.autoClear).toBe(true);
+    expect(renders).toBe(3);
+    expect(camera.layers.mask).toBe(1);
+    expect(overlay.background).toBeNull();
+  });
+
+  test("keeps a selected single-member equivalent group marked when the traced frame hides the editing rim", () => {
+    const source = sceneWithExportVisibilityAtoms();
+    const scene = { ...source, atoms: [source.atoms[0]!] };
+    const selectedAtomIds = new Set([scene.atoms[0]!.id]);
+    const options = {
+      atomOpacity: 100, inspectedAtomId: null, scene, selectedAtomIds, showAtoms: true,
+      siteIds: new Set([scene.atoms[0]!.siteId]), style: createDefaultStyle(),
+    };
+    expect(equivalentSiteRenderItems({ ...options, editingRimVisible: true })).toEqual([]);
+    const traced = equivalentSiteRenderItems({ ...options, editingRimVisible: false });
+    expect(traced.map(item => [item.id, item.editingSelected])).toEqual([[scene.atoms[0]!.id, true]]);
+    expect(equivalentSiteRenderItems({ ...options, selectedAtomIds: new Set(), editingRimVisible: false })
+      .map(item => [item.id, item.editingSelected])).toEqual([[scene.atoms[0]!.id, false]]);
+    expect(equivalentSiteRenderItems({
+      ...options, selectedAtomIds: new Set(), inspectedAtomId: scene.atoms[0]!.id, editingRimVisible: false,
+    }).map(item => [item.id, item.editingSelected])).toEqual([[scene.atoms[0]!.id, true]]);
+    expect(equivalentSiteRenderItems({ ...options, siteIds: new Set(), editingRimVisible: false })).toEqual([]);
+    expect(equivalentSiteRenderItems({ ...options, atomOpacity: 0, editingRimVisible: false })).toEqual([]);
+    expect([...selectedAtomIds]).toEqual([scene.atoms[0]!.id]);
   });
 
   test("excludes zero-opacity bonds before batching and picking", () => {

@@ -44,7 +44,70 @@ def test_find_reports_current_cell_site_groups_without_mutation() -> None:
         "operationCount": 192,
         "equivalentSites": [["site-0", "site-1", "site-2", "site-3"]],
         "tolerance": 1e-5,
+        "setting": {"hallNumber": 523, "hallSymbol": "-F 4 2 3", "choice": ""},
+        "siteDetails": [
+            {"siteId": f"site-{index}", "wyckoffLetter": "a", "siteSymmetrySymbol": "m-3m"}
+            for index in range(4)
+        ],
     }
+    assert structure == original
+
+
+def test_fcc_supercell_keeps_wyckoff_letters_separate_from_group_member_counts() -> None:
+    conventional = fcc_model()
+    supercell = model(
+        [[7, 0, 0], [0, 3.5, 0], [0, 0, 3.5]],
+        [
+            [(x + image) / 2, y, z]
+            for image in range(2)
+            for x, y, z in (site["fractionalPosition"] for site in conventional["sites"])
+        ],
+    )
+    original = deepcopy(supercell)
+    conventional_result = find_model_symmetry(conventional)
+    supercell_result = find_model_symmetry(supercell)
+    assert supercell_result["number"] == conventional_result["number"] == 225
+    assert supercell_result["setting"] == conventional_result["setting"]
+    assert [len(group) for group in conventional_result["equivalentSites"]] == [4]
+    assert [len(group) for group in supercell_result["equivalentSites"]] == [8]
+    assert supercell_result["siteDetails"] == [
+        {"siteId": f"site-{index}", "wyckoffLetter": "a", "siteSymmetrySymbol": "m-3m"}
+        for index in range(8)
+    ]
+    assert supercell == original
+
+
+def test_same_element_and_wyckoff_letter_do_not_merge_independent_site_groups() -> None:
+    structure = model(
+        [[4.1, 0, 0], [0.3, 5.2, 0], [0.4, 0.6, 6.3]],
+        [
+            [0.13, 0.27, 0.31],
+            [0, 0, 0],
+            [0.24, 0.43, 0.11],
+            [-0.13, -0.27, -0.31],
+            [-0.24, -0.43, -0.11],
+        ],
+    )
+    site_ids = ["first-pair", "center", "second-pair", "first-image", "second-image"]
+    for site, site_id in zip(structure["sites"], site_ids, strict=True):
+        site["siteId"] = site_id
+    original = deepcopy(structure)
+    found = find_model_symmetry(structure)
+    assert found["number"] == 2
+    assert found["setting"] == {"hallNumber": 2, "hallSymbol": "-P 1", "choice": ""}
+    assert found["equivalentSites"] == [
+        ["first-pair", "first-image"],
+        ["center"],
+        ["second-pair", "second-image"],
+    ]
+    assert found["siteDetails"] == [
+        {
+            "siteId": site_id,
+            "wyckoffLetter": "a" if site_id == "center" else "i",
+            "siteSymmetrySymbol": "-1" if site_id == "center" else "1",
+        }
+        for site_id in site_ids
+    ]
     assert structure == original
 
 
@@ -60,6 +123,7 @@ def test_perfect_supercell_stays_a_supercell_with_unchanged_ids_and_metadata() -
     assert len(proposal["structure"]["sites"]) == 8
     assert proposal["structure"] == original
     assert proposal["structure"] is not structure
+    assert proposal["result"] == found
     assert proposal["maxDisplacement"] == proposal["rmsDisplacement"] == 0
     assert structure == original
 
@@ -232,6 +296,8 @@ async def test_json_endpoints_return_candidates_and_stable_errors() -> None:
         )
         assert found.status_code == 200
         assert found.json()["number"] == 225
+        assert found.json()["setting"]["hallNumber"] == 523
+        assert len(found.json()["siteDetails"]) == 4
         imposed = await client.post(
             "/api/model-symmetry/impose",
             json={
@@ -242,6 +308,7 @@ async def test_json_endpoints_return_candidates_and_stable_errors() -> None:
         )
         assert imposed.status_code == 200
         assert imposed.json()["structure"] == fcc_model()
+        assert imposed.json()["result"] == found.json()
         stale = await client.post(
             "/api/model-symmetry/impose",
             json={

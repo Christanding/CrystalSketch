@@ -46,6 +46,7 @@ import {
 } from "./StructureSceneObjects";
 import { computeSceneStructureLayout, type SceneLayout } from "./sceneLayout";
 import { DEFAULT_RENDERER_PARAMETERS } from "./rendererParameters";
+import { EquivalentSiteOverlay } from "./EquivalentSiteOverlay";
 import type { VectorTuple } from "./viewMath";
 
 export type { PreviewSafeArea } from "../model/layout";
@@ -102,6 +103,7 @@ const FPS_REPORT_INTERVAL_MS = 250;
 const FPS_SMOOTHING_WEIGHT = 0.18;
 const StudioLighting = lazy(() => import("./StudioLighting"));
 const PathTracingPreview = lazy(() => import("./PathTracingPreview"));
+const EMPTY_EQUIVALENT_SITE_IDS: ReadonlySet<string> = new Set();
 
 export function LatticeScene({
   renderingProgress,
@@ -115,6 +117,7 @@ export function LatticeScene({
   comparisonCameraStore,
   comparisonViewId,
   componentOpacity,
+  equivalentSiteIds = EMPTY_EQUIVALENT_SITE_IDS,
   dragSensitivity = DEFAULT_DRAG_SENSITIVITY,
   interactionLocked,
   interactionMode,
@@ -163,6 +166,7 @@ export function LatticeScene({
   comparisonViewId?: string;
   cameraState: CrystalCameraState;
   componentOpacity: ComponentOpacityState;
+  equivalentSiteIds?: ReadonlySet<string>;
   dragSensitivity?: number;
   interactionLocked: boolean;
   interactionMode: InteractionMode;
@@ -238,6 +242,7 @@ export function LatticeScene({
   const settings = useMemo(() => readRenderSettings(style.rendering), [style.rendering]);
   const studio = usesStudioLighting(style);
   const [traceVisible, setTraceVisible] = useState(false);
+  const showingPathTrace = traceVisible && studio && settings.mode === "path-traced";
   const handleAoError = useCallback(() => renderingProgress?.({ phase: "error", samples: 0, targetSamples: 0,
     elapsedMs: 0, message: "ao-failed" }), [renderingProgress]);
   const materialFamily = useMemo(
@@ -261,7 +266,7 @@ export function LatticeScene({
     >
       <color attach="background" args={[previewTheme.background]} />
       <DemandFrameInvalidator />
-      <SceneRenderer presetId={materialPreset} settings={settings} traceVisible={traceVisible && studio && settings.mode === "path-traced"}
+      <SceneRenderer presetId={materialPreset} settings={settings} traceVisible={showingPathTrace}
         onError={handleAoError} restart={renderingRestart}
         aoRadius={Math.max(0.1, layout.span / Math.cbrt(Math.max(1, scene.atoms.length)) * 0.65)}
         transparent={sceneHasTransparency(scene, componentOpacity, style, showAtoms, showUnitCell)} />
@@ -333,6 +338,19 @@ export function LatticeScene({
         unitCellLineColor={previewTheme.unitCell}
         unitCellLineWidthScale={structureLineWidth.unitCell}
       />
+      {equivalentSiteIds.size > 0 ? (
+        <EquivalentSiteOverlay
+          atomOpacity={componentOpacity.atoms}
+          editingRimVisible={!showingPathTrace}
+          groupPosition={layout.groupPosition}
+          inspectedAtomId={inspectedAtomId}
+          scene={scene}
+          showAtoms={showAtoms}
+          siteIds={equivalentSiteIds}
+          style={style}
+          theme={theme}
+        />
+      ) : null}
       <CameraOrientationTracker
         cameraOrientationRef={cameraOrientationRef}
         onCameraOrientationFrame={onCameraOrientationFrame}

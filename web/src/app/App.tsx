@@ -66,6 +66,7 @@ import { usePoscarExportController } from "./hooks/usePoscarExportController";
 import { FigurePreviewDialog } from "./controls/commonPanel/FigurePreviewDialog";
 import { ModelingPanel } from "./inspector/ModelingPanel";
 import { useModelingController } from "./hooks/useModelingController";
+import { useSymmetryInspection } from "./hooks/useSymmetryInspection";
 import { fractionalToCartesian, modelToScene, type Vec3 } from "../model/structureModel";
 import { useLockedInteractionFeedback } from "./hooks/useLockedInteractionFeedback";
 import { usePreviewCameraCommands } from "./hooks/usePreviewCameraCommands";
@@ -483,6 +484,14 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
     unitCellLineStyle,
     visibleScene: measurementTools.previewScene,
   });
+  const symmetryInspection = useSymmetryInspection({
+    sessionId: session?.id, revision: session?.model?.revision,
+    structure: session?.model?.state.structure ?? null, analysis: session?.model?.symmetry ?? null,
+    scene: measurementTools.previewScene, style, showAtoms: componentVisibility.atoms,
+    atomOpacity: componentOpacity.atoms, selection: interaction.selection, inspectedAtomId,
+    active: active && isInspectorOpen && activeInspectorTab === "modeling"
+      && !modeling.controller.busy && !modeling.previewScene && !isExporting && !figurePreview.open,
+  });
   const workspacePreferences = useMemo<WorkspacePreferences | null>(() => session ? {
     version: 1,
     modelDocument: Boolean(session.model),
@@ -727,6 +736,7 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
                 safeArea={previewSafeArea}
                 scene={modelingPreviewScene ?? measurementTools.previewScene ?? visibleScene!}
                 inspectedAtomId={inspectedAtomId}
+                equivalentSiteIds={symmetryInspection.equivalentSiteIds}
                 inspectedBondId={inspectedBondId}
                 pulseAtomId={
                   pulsedSceneObject?.kind === "atom"
@@ -999,7 +1009,7 @@ function AppContent({ initialWorkspace, leftSidebarOpen, onLeftSidebarOpenChange
                   renderingPaused={renderingPaused || isExporting}
                   onRenderingPausedChange={isExporting ? undefined : setRenderingPaused}
                   onRenderingRestart={() => { setRenderingPaused(false); setRenderingRestart(value => value + 1); }}
-                  modelingContent={<ModelingPanel controller={modeling.controller} />}
+                  modelingContent={<ModelingPanel controller={modeling.controller} symmetryInspection={symmetryInspection.controller} />}
                   sourceScene={sourceScene ?? undefined}
                   deletedSelection={editing.snapshot.deleted}
                   onRestoreObjects={editing.restoreObjects}

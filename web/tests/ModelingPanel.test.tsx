@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { useState } from "react";
@@ -12,6 +12,119 @@ import { PERIODIC_TABLE_ELEMENTS, PERIODIC_ELEMENT_SYMBOLS, filterPeriodicElemen
 import { elementRadiusSymbols } from "../src/model/elementRadii";
 import { applyModelOperation, createModelState, modelToScene, type ModelOperation, type ModelState } from "../src/model/structureModel";
 import { i18n } from "../src/i18n";
+import { useSymmetryInspection } from "../src/app/hooks/useSymmetryInspection";
+import { SymmetryInspectionPanel } from "../src/app/inspector/SymmetryInspectionPanel";
+import type { ModelSymmetryResult } from "../src/api/modelSymmetry";
+import { createDefaultStyle } from "../src/model";
+import { selectSceneObject, type SceneSelection } from "../src/selection/SceneSelection";
+
+describe("read-only symmetry inspection", () => {
+  test("inspecting a group never changes edit selection, source, or appearance; the next atom selection can change the marked group", () => {
+    const props = inspectionProps();
+    const before = JSON.stringify({ structure: props.structure, scene: props.scene, style: props.style });
+    const selectedIds = [...props.selection.atoms];
+    const { result, rerender } = renderHook(useSymmetryInspection, { initialProps: props });
+    expect(result.current.controller.enabled).toBe(false);
+    expect(result.current.equivalentSiteIds.size).toBe(0);
+    act(() => result.current.controller.onInspectGroup("site-a"));
+    expect([...result.current.equivalentSiteIds]).toEqual(["site-a", "site-b"]);
+    expect([...props.selection.atoms]).toEqual(selectedIds);
+    expect(JSON.stringify({ structure: props.structure, scene: props.scene, style: props.style })).toBe(before);
+    const atom = props.scene!.atoms.find(atom => atom.siteId === "site-c" && !atom.isPeriodicImage)!;
+    const selection = selectSceneObject(props.selection, "atom", atom.id, false);
+    rerender({ ...props, selection, inspectedAtomId: atom.id });
+    expect([...result.current.equivalentSiteIds]).toEqual(["site-c", "site-d"]);
+    expect(selection.atoms.size).toBe(1);
+  });
+
+  test("same Wyckoff letters keep distinct groups and visible periodic copies never inflate model counts", () => {
+    const props = inspectionProps();
+    const { result, rerender } = renderHook(useSymmetryInspection, { initialProps: props });
+    expect(result.current.controller.groups.map(group => group.wyckoffLetters)).toEqual([["i"], ["i"]]);
+    expect(result.current.controller.groups.map(group => group.members.length)).toEqual([2, 2]);
+    expect(result.current.controller.groups[0]!.members.every(member => member.visible)).toBe(true);
+    const style = { ...props.style, objectStyles: { ...props.style.objectStyles,
+      atomOverrides: { "site-a": { visible: false }, "site-b": { opacity: 0 } } } };
+    rerender({ ...props, style });
+    expect(result.current.controller.groups[0]!.members.every(member => !member.visible)).toBe(true);
+    expect(style.objectStyles.atomOverrides).toEqual({ "site-a": { visible: false }, "site-b": { opacity: 0 } });
+    rerender({ ...props, showAtoms: false });
+    expect(result.current.controller.groups.every(group => group.members.every(member => !member.visible))).toBe(true);
+  });
+
+  test("leaving the panel, changing revision or documents, and replacing results clears temporary marking", () => {
+    const props = inspectionProps();
+    const { result, rerender } = renderHook(useSymmetryInspection, { initialProps: props });
+    act(() => result.current.controller.onInspectGroup("site-a"));
+    rerender({ ...props, active: false });
+    expect(result.current.equivalentSiteIds.size).toBe(0);
+    rerender(props);
+    expect(result.current.controller.enabled).toBe(false);
+    act(() => result.current.controller.onInspectGroup("site-a"));
+    rerender({ ...props, revision: 1 });
+    expect(result.current.equivalentSiteIds.size).toBe(0);
+    act(() => result.current.controller.onInspectGroup("site-a"));
+    rerender({ ...props, revision: 1, sessionId: "another-document" });
+    expect(result.current.controller.enabled).toBe(false);
+    act(() => result.current.controller.onInspectGroup("site-a"));
+    rerender({ ...props, revision: 1, sessionId: "another-document", analysis: { ...props.analysis!, tolerance: .01 } });
+    expect(result.current.controller.enabled).toBe(false);
+  });
+
+  test("older results retain groups without details, while mismatched or overlapping groups never highlight", () => {
+    const props = inspectionProps();
+    const { siteDetails: _details, setting: _setting, ...legacy } = props.analysis!;
+    const { result, rerender } = renderHook(useSymmetryInspection, { initialProps: { ...props, analysis: legacy } });
+    expect(result.current.controller.valid).toBe(true);
+    expect(result.current.controller.groups.every(group => !group.hasDetails)).toBe(true);
+    for (const equivalentSites of [[["site-a", "site-b"]], [["site-a", "site-b"], ["site-b", "site-c"]], [["removed"]]]) {
+      rerender({ ...props, analysis: { ...legacy, equivalentSites } });
+      act(() => result.current.controller.onInspectGroup("site-a"));
+      expect(result.current.controller.valid).toBe(false);
+      expect(result.current.equivalentSiteIds.size).toBe(0);
+    }
+  });
+
+  test("the details panel explains old tolerance and resets its temporary switch when collapsed", async () => {
+    const user = userEvent.setup();
+    render(<InspectionHarness />);
+    expect(screen.getByText(i18n.t("symmetryInspection.oldTolerance"))).toBeTruthy();
+    const summary = screen.getByText(i18n.t("symmetryInspection.groups", { count: 2 }));
+    await user.click(summary);
+    await user.click(screen.getByRole("button", { name: i18n.t("symmetryInspection.group", { number: 1, element: "Cu", count: 2 }) }));
+    expect(screen.getByRole("switch", { name: i18n.t("symmetryInspection.highlight") }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByTestId("equivalence-highlight").textContent).toBe("site-a,site-b");
+    await user.click(summary);
+    await waitFor(() => expect(screen.getByTestId("equivalence-highlight").textContent).toBe(""));
+  });
+});
+
+function inspectionProps(): Parameters<typeof useSymmetryInspection>[0] {
+  const model = createModelState({ cell: { vectors: [[10, 0, 0], [1, 11, 0], [2, 3, 12]] }, species: ["Cu"], sites: [
+    { siteId: "site-a", speciesIndex: 0, fractionalPosition: [.1, .2, .3], sourceAtomNumber: 1 },
+    { siteId: "site-b", speciesIndex: 0, fractionalPosition: [.9, .8, .7], sourceAtomNumber: 2 },
+    { siteId: "site-c", speciesIndex: 0, fractionalPosition: [.23, .33, .43], sourceAtomNumber: 3 },
+    { siteId: "site-d", speciesIndex: 0, fractionalPosition: [.77, .67, .57], sourceAtomNumber: 4 },
+  ] });
+  const scene = modelToScene(model);
+  const first = scene.atoms.find(atom => atom.siteId === "site-a" && !atom.isPeriodicImage)!;
+  scene.atoms.push({ ...first, id: `${first.id}-visible-image`, position: [first.position[0] + 10, first.position[1], first.position[2]],
+    isPeriodicImage: true, imageOffset: [1, 0, 0] });
+  const selection: SceneSelection = { atoms: new Set([first.id]), bonds: new Set() };
+  const analysis: ModelSymmetryResult = { number: 2, symbol: "P-1", pointGroup: "-1", operationCount: 2,
+    tolerance: 1e-5, equivalentSites: [["site-a", "site-b"], ["site-c", "site-d"]],
+    setting: { hallNumber: 2, hallSymbol: "-P 1", choice: "" },
+    siteDetails: model.structure.sites.map(site => ({ siteId: site.siteId, wyckoffLetter: "i", siteSymmetrySymbol: "1" })) };
+  return { sessionId: "inspection", revision: 0, structure: model.structure, analysis, scene, selection,
+    style: createDefaultStyle(), showAtoms: true, atomOpacity: 100, inspectedAtomId: first.id, active: true };
+}
+
+function InspectionHarness() {
+  const [props] = useState(inspectionProps);
+  const inspection = useSymmetryInspection(props);
+  return <><output data-testid="equivalence-highlight">{[...inspection.equivalentSiteIds].join(",")}</output>
+    <SymmetryInspectionPanel controller={inspection.controller} toleranceChanged /></>;
+}
 
 describe("periodic table", () => {
   test("covers 118 unique numbered elements, preserves known registry symbols and standard grid positions", () => {

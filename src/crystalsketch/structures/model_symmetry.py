@@ -290,6 +290,23 @@ def _find_result(dataset, site_ids: list[str], tolerance: float) -> dict:
         "operationCount": len(dataset.rotations),
         "equivalentSites": list(groups.values()),
         "tolerance": tolerance,
+        "setting": {
+            "hallNumber": int(dataset.hall_number),
+            "hallSymbol": str(dataset.hall),
+            "choice": str(dataset.choice),
+        },
+        # These arrays follow input-site order; their symbols use spglib's standard setting.
+        # Current-cell group sizes are not Wyckoff multiplicities.
+        "siteDetails": [
+            {
+                "siteId": site_id,
+                "wyckoffLetter": str(letter),
+                "siteSymmetrySymbol": str(symbol),
+            }
+            for site_id, letter, symbol in zip(
+                site_ids, dataset.wyckoffs, dataset.site_symmetry_symbols, strict=True
+            )
+        ],
     }
 
 

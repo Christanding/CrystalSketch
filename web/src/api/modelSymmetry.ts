@@ -9,6 +9,9 @@ export interface ModelSymmetryResult {
   operationCount: number;
   equivalentSites: string[][];
   tolerance: number;
+  /** Optional for workspaces saved before site-level symmetry details existed. */
+  setting?: { hallNumber: number; hallSymbol: string; choice: string };
+  siteDetails?: { siteId: string; wyckoffLetter: string; siteSymmetrySymbol: string }[];
 }
 export interface ModelSymmetryCandidate {
   structure: PeriodicStructure;

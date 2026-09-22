@@ -19,6 +19,8 @@ import {
   type Vec3,
 } from "../../model/structureModel";
 import { PeriodicTablePicker } from "./PeriodicTablePicker";
+import { SymmetryInspectionPanel } from "./SymmetryInspectionPanel";
+import type { SymmetryInspectionController } from "../hooks/useSymmetryInspection";
 
 export interface ModelingPanelController {
   model: ModelState | null;
@@ -41,7 +43,10 @@ const AXES = ["a", "b", "c"] as const;
 const CARTESIAN_AXES = ["x", "y", "z"] as const;
 const INTERSTITIAL_POSITION: Vec3 = [0.5, 0.5, 0.5];
 
-export function ModelingPanel({ controller }: { controller: ModelingPanelController }) {
+export function ModelingPanel({ controller, symmetryInspection }: {
+  controller: ModelingPanelController;
+  symmetryInspection?: SymmetryInspectionController;
+}) {
   const { t } = useTranslation();
   const { model, busy, preview, error } = controller;
   const locked = busy || preview !== null;
@@ -101,7 +106,7 @@ export function ModelingPanel({ controller }: { controller: ModelingPanelControl
       </PanelSection>
       <Separator />
       <PanelSection title={t("modeling.symmetry")}>
-        <SymmetryEditor controller={controller} disabled={locked} />
+        <SymmetryEditor controller={controller} disabled={locked} inspection={symmetryInspection} />
       </PanelSection>
     </div>
     {(preview || error || busy) ? <div className="flex shrink-0 flex-col gap-2 border-t bg-card px-4 py-3" data-modeling-transaction="">
@@ -260,7 +265,9 @@ function DefectRow({ model, defect, disabled, onLocate, onPreview }: OperationEd
   </li>;
 }
 
-function SymmetryEditor({ controller, disabled }: { controller: ModelingPanelController; disabled: boolean }) {
+function SymmetryEditor({ controller, disabled, inspection }: {
+  controller: ModelingPanelController; disabled: boolean; inspection?: SymmetryInspectionController;
+}) {
   const { t } = useTranslation();
   const foundTolerance = controller.symmetry?.tolerance;
   const [tolerance, setTolerance] = useState(() => foundTolerance === undefined ? "1e-5" : String(foundTolerance));
@@ -288,6 +295,7 @@ function SymmetryEditor({ controller, disabled }: { controller: ModelingPanelCon
       <span className="text-muted-foreground">{t("modeling.operationCount", { count: controller.symmetry.operationCount })}</span>
     </div> : null}
     <Button variant="outline" size="sm" disabled={disabled || !matchesResult} onClick={controller.onPreviewImpose}>{t("modeling.impose")}</Button>
+    {inspection ? <SymmetryInspectionPanel controller={inspection} toleranceChanged={!matchesResult} /> : null}
   </fieldset>;
 }
 

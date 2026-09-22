@@ -577,7 +577,7 @@ export function populateAtomSelectionRim(mesh: InstancedMesh, items: readonly Pi
 
 function ignoreAtomSelectionRimRaycast() {}
 
-const ATOM_SELECTION_RIM_VERTEX_SHADER = `
+export const ATOM_SELECTION_RIM_VERTEX_SHADER = `
   varying vec3 vViewNormal;
   varying vec3 vViewPosition;
 
@@ -589,7 +589,7 @@ const ATOM_SELECTION_RIM_VERTEX_SHADER = `
   }
 `;
 
-const ATOM_SELECTION_RIM_FRAGMENT_SHADER = `
+export const ATOM_SELECTION_RIM_FRAGMENT_SHADER = `
   uniform vec3 selectionColor;
   uniform float selectionOpacity;
   varying vec3 vViewNormal;
