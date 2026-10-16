@@ -114,13 +114,58 @@ Crystal
 
 ## 卸载
 
-先在运行 CrystalSketch 的终端按 `Ctrl+C` 停止程序，再使用安装时的系统账号在终端执行：
+先导出需要保留的结构和图片，等待正在进行的更新结束，再在运行 CrystalSketch 的终端按 `Ctrl+C` 停止程序并关闭它的浏览器标签页。使用安装时的系统账号执行下面一种卸载方式；**不要在更新过程中卸载**。
+
+### 只卸载程序，保留使用记录
 
 ```sh
 uv tool uninstall crystalsketch
 ```
 
-该命令只移除 CrystalSketch 专属工具目录（包含其私有依赖副本）及 `Crystal` 启动命令。已经安装的 uv、Python 解释器、Git、Bun、其他项目的环境和工具都会保留；原始结构文件、浏览器保存的工作区及导出图片也不会清理。不需要执行 `uv python uninstall` 或 `uv tool uninstall --all`。
+该命令移除 CrystalSketch 专属工具目录（包含其私有依赖副本）及 `Crystal` 启动命令，保留程序缓存和浏览器工作区。
+
+### 完整卸载本地程序与缓存
+
+下面每个代码块都是一条可整段粘贴执行的命令：先卸载程序，成功后再将 CrystalSketch 自身的更新下载、日志、回退备份和运行状态目录移入回收站／废纸篓。缓存不存在时跳过；卸载失败时不清理缓存。
+
+Windows，在 PowerShell 中执行（使用系统[回收站接口](https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualbasic.fileio.filesystem.deletedirectory)）：
+
+```powershell
+& {
+    $ErrorActionPreference = 'Stop'
+    if (-not $env:LOCALAPPDATA -or -not [IO.Path]::IsPathRooted($env:LOCALAPPDATA)) { throw 'LOCALAPPDATA must be an absolute path.' }
+    $crystalCache = Join-Path $env:LOCALAPPDATA 'CrystalSketch'
+    if ((Test-Path -LiteralPath $crystalCache) -and ((Get-Item -LiteralPath $crystalCache -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Cache is a link; inspect it before removing it.' }
+    uv tool uninstall crystalsketch
+    if ($LASTEXITCODE -ne 0) { throw 'Uninstall failed; cache was not removed.' }
+    if (Test-Path -LiteralPath $crystalCache) {
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory($crystalCache, 'OnlyErrorDialogs', 'SendToRecycleBin')
+    }
+}
+```
+
+macOS，在终端执行：
+
+```sh
+bash -c 'set -e; uv tool uninstall crystalsketch; crystal_cache="${HOME:?}/Library/Caches/CrystalSketch"; if [ -e "$crystal_cache" ] || [ -L "$crystal_cache" ]; then crystal_trash="$(mktemp -d "${HOME:?}/.Trash/CrystalSketch-cache.XXXXXXXX")"; mv "$crystal_cache" "$crystal_trash/CrystalSketch"; fi'
+```
+
+Linux 桌面环境提供 `gio` 时，在终端执行：
+
+```sh
+bash -c 'set -e; command -v gio >/dev/null || { printf "%s\n" "gio is required to move the cache to Trash; no changes made." >&2; exit 1; }; crystal_cache="${XDG_CACHE_HOME:-${HOME:?}/.cache}/CrystalSketch"; case "$crystal_cache" in /*) ;; *) printf "%s\n" "XDG_CACHE_HOME must be an absolute path." >&2; exit 1;; esac; uv tool uninstall crystalsketch; if [ -e "$crystal_cache" ] || [ -L "$crystal_cache" ]; then gio trash "$crystal_cache"; fi'
+```
+
+如果系统拒绝访问回收站，程序可能已经卸载，但缓存仍在原处；按错误提示处理权限，或在文件管理器中将该目录移入回收站。Linux 没有 `gio` 时，可先执行普通卸载，再手动移走 `${XDG_CACHE_HOME:-$HOME/.cache}/CrystalSketch`。需要释放缓存占用时，再自行清空回收站中的对应项目。
+
+两种卸载方式都**保留 uv、Python 解释器、Git、Bun、其他项目的环境和工具，以及原始结构文件和导出图片**。不清理共享的 uv 缓存或命令目录，不移除共享 PATH 项，也不扫描删除下载的安装包和源码目录。不要执行 `uv python uninstall`、`uv tool uninstall --all`，或删除整个 `.local`、AppData、Python 目录。
+
+### 浏览器中的工作区和设置
+
+终端命令不会清除浏览器保存的数据。若希望同时清掉工作区、未导出的模型副本和偏好设置，先确认所需内容已经导出，再在使用过的浏览器配置中清理 CrystalSketch 对应本地地址的站点存储。地址以启动终端显示的实际域名和端口为准；`localhost`、`127.0.0.1` 和不同端口的存储是分开的。
+
+如果同一地址还被其他本地工具用过，不要直接清空该地址的全部数据。可在卸载前关闭其他 CrystalSketch 标签页，在当前页面的开发者工具存储面板中，仅移除 IndexedDB 数据库 `crystalsketch-workspace`，以及 Local Storage 中以 `crystalsketch.` 或 `crystalsketch-` 开头的项目；清理后直接关闭当前页面，再执行终端卸载。此操作会丢失尚未导出的工作区内容，但不会删除磁盘上的原始文件。在线版的浏览器记录也独立于本地安装，不会随本地卸载自动清理。
 
 ## 常见问题
 
