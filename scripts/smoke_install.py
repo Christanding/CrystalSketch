@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from html.parser import HTMLParser
 from pathlib import Path
@@ -70,6 +71,18 @@ def stop_process(process: subprocess.Popen) -> None:
         process.wait(timeout=5)
 
 
+def verify_update_check(base_url: str) -> None:
+    opener = build_opener(ProxyHandler({}))
+    with opener.open(urljoin(base_url, "api/updates/check"), timeout=20) as response:
+        status = json.load(response)
+    if status.get("supported") is not True or status.get("status") not in {"latest", "available"}:
+        raise RuntimeError(f"Installed application cannot update: {status.get('reason')}")
+    print(
+        f"PASS: installed v{status['currentVersion']} supports in-app updates; "
+        f"latest release v{status['latestVersion']} ({status['status']}); no update applied"
+    )
+
+
 def verify_repeat_launch(command: str, work: str, environment: dict[str, str], port: str) -> None:
     repeat = subprocess.Popen(
         [command, "--no-open", "--port", "0"], cwd=work, env=environment,
@@ -87,6 +100,9 @@ def verify_repeat_launch(command: str, work: str, environment: dict[str, str], p
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work-dir", type=Path, required=True)
+    parser.add_argument(
+        "--check-updates", action="store_true", help="Check update support without installing"
+    )
     args = parser.parse_args()
     repository = Path(__file__).resolve().parents[1]
     if args.work_dir.resolve().is_relative_to(repository):
@@ -116,44 +132,52 @@ def main() -> None:
     if not command or Path(command).resolve().is_relative_to(repository):
         raise SystemExit("Crystal must be installed globally and available on persisted PATH")
     with tempfile.TemporaryDirectory(prefix="crystalsketch-smoke-", dir=args.work_dir) as work:
-        log_path = Path(work) / "server.log"
-        with log_path.open("w", encoding="utf-8") as log:
-            process = subprocess.Popen(
-                [command, "--no-open", "--host", "127.0.0.1", "--port", "0"],
-                cwd=work, env=environment, stdout=log, stderr=subprocess.STDOUT,
-            )
-            try:
-                deadline = time.monotonic() + 60
-                while time.monotonic() < deadline:
-                    if process.poll() is not None:
-                        raise RuntimeError(f"Crystal exited early with code {process.returncode}")
-                    output = log_path.read_text(encoding="utf-8", errors="replace")
-                    match = re.search(r"http://localhost:(\d+)/", output)
-                    if match:
-                        base_url = f"http://127.0.0.1:{match[1]}/"
-                        try:
-                            verify(base_url)
-                        except (URLError, TimeoutError):
-                            pass
-                        else:
-                            verify_repeat_launch(command, work, environment, match[1])
-                            if process.poll() is not None:
-                                raise RuntimeError("Repeat launch stopped the original service")
-                            verify(base_url)
-                            print(
-                                "PASS: global Crystal served HTML, JavaScript "
-                                f"and health at {base_url}; repeat launch reused that service"
-                            )
-                            return
-                    time.sleep(0.2)
-                raise RuntimeError(
-                    "Crystal did not serve the installed application within 60 seconds"
-                )
-            except Exception:
-                print(log_path.read_text(encoding="utf-8", errors="replace"))
-                raise
-            finally:
-                stop_process(process)
+        output: list[str] = []
+        process = subprocess.Popen(
+            [command, "--no-open", "--host", "127.0.0.1", "--port", "0"],
+            cwd=work, env=environment, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, encoding="utf-8", errors="replace",
+        )
+        assert process.stdout is not None
+        reader = threading.Thread(target=output.extend, args=(process.stdout,), daemon=True)
+        reader.start()
+        try:
+            deadline = time.monotonic() + 60
+            while time.monotonic() < deadline:
+                if process.poll() is not None:
+                    raise RuntimeError(f"Crystal exited early with code {process.returncode}")
+                match = re.search(r"http://localhost:(\d+)/", "".join(output))
+                if match:
+                    base_url = f"http://127.0.0.1:{match[1]}/"
+                    try:
+                        verify(base_url)
+                    except (URLError, TimeoutError):
+                        pass
+                    else:
+                        verify_repeat_launch(command, work, environment, match[1])
+                        if process.poll() is not None:
+                            raise RuntimeError("Repeat launch stopped the original service")
+                        verify(base_url)
+                        if args.check_updates:
+                            verify_update_check(base_url)
+                        print(
+                            "PASS: global Crystal served HTML, JavaScript "
+                            f"and health at {base_url}; repeat launch reused that service"
+                        )
+                        return
+                time.sleep(0.2)
+            raise RuntimeError("Crystal did not serve the installed application within 60 seconds")
+        except Exception:
+            print("".join(output))
+            raise
+        finally:
+            stop_process(process)
+            # Windows launcher exit can precede its Python child's exit. EOF waits
+            # for every inherited output handle without leaving a locked log file.
+            reader.join(timeout=10)
+            if reader.is_alive():
+                raise RuntimeError("The installed process tree did not close its output")
+            process.stdout.close()
 
 
 if __name__ == "__main__":

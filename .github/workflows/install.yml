@@ -25,14 +25,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Configure isolated installation directories
-        shell: bash
+        shell: pwsh
         run: |
-          printf '%s\n' \
-            "UV_INSTALL_DIR=$RUNNER_TEMP/crystal-bootstrap-uv" \
-            "UV_TOOL_DIR=$RUNNER_TEMP/crystal-bootstrap-tools" \
-            "UV_TOOL_BIN_DIR=$RUNNER_TEMP/Crystal bootstrap a'a commands" \
-            "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/crystal-bootstrap-python" \
-            "UV_CACHE_DIR=$RUNNER_TEMP/crystal-bootstrap-cache" >> "$GITHUB_ENV"
+          @{
+            UV_INSTALL_DIR = 'crystal-bootstrap-uv'
+            UV_TOOL_DIR = 'crystal-bootstrap-tools'
+            UV_TOOL_BIN_DIR = "Crystal bootstrap a'a commands"
+            UV_PYTHON_INSTALL_DIR = 'crystal-bootstrap-python'
+            UV_CACHE_DIR = 'crystal-bootstrap-cache'
+          }.GetEnumerator() | ForEach-Object {
+            "$($_.Key)=$(Join-Path $env:RUNNER_TEMP $_.Value)"
+          } | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Verify Windows bootstrap failure handling
         if: runner.os == 'Windows'
@@ -45,6 +48,8 @@ jobs:
         run: |
           # No setup-python/setup-uv/setup-bun. Force a fresh managed Python rather
           # than using an interpreter provided by the runner image.
+          # Disambiguate Bash from the runner's inherited PowerShell environment.
+          export BASH_VERSION
           if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
             PATH=/usr/bin:/bin:/usr/sbin:/sbin bash scripts/bootstrap.sh
           else
@@ -73,8 +78,8 @@ jobs:
           @($env:UV_INSTALL_DIR, $env:UV_TOOL_BIN_DIR) |
             Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-      - name: Verify installed command and repeated launch
-        run: uv run --no-project --python 3.12 python scripts/smoke_install.py --work-dir "${{ runner.temp }}"
+      - name: Verify installed command, repeated launch and update support
+        run: uv run --no-project --python 3.12 python scripts/smoke_install.py --work-dir "${{ runner.temp }}" --check-updates
 
       - name: Verify uninstall preserves Python and unrelated environments
         shell: bash
