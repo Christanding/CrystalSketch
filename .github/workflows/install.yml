@@ -10,6 +10,94 @@ permissions:
   contents: read
 
 jobs:
+  bootstrap:
+    name: Online bootstrap on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      UV_MANAGED_PYTHON: '1'
+      UV_PYTHON_DOWNLOADS: automatic
+      UV_NO_CONFIG: '1'
+    steps:
+      - uses: actions/checkout@v7
+      - name: Configure isolated installation directories
+        shell: bash
+        run: |
+          printf '%s\n' \
+            "UV_INSTALL_DIR=$RUNNER_TEMP/crystal-bootstrap-uv" \
+            "UV_TOOL_DIR=$RUNNER_TEMP/crystal-bootstrap-tools" \
+            "UV_TOOL_BIN_DIR=$RUNNER_TEMP/Crystal bootstrap a'a commands" \
+            "UV_PYTHON_INSTALL_DIR=$RUNNER_TEMP/crystal-bootstrap-python" \
+            "UV_CACHE_DIR=$RUNNER_TEMP/crystal-bootstrap-cache" >> "$GITHUB_ENV"
+
+      - name: Verify Windows bootstrap failure handling
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: .\tests\bootstrap_windows.ps1
+
+      - name: Install without preconfigured development tools (macOS / Linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          # No setup-python/setup-uv/setup-bun. Force a fresh managed Python rather
+          # than using an interpreter provided by the runner image.
+          if [[ "$GITHUB_EVENT_NAME" == "pull_request" ]]; then
+            PATH=/usr/bin:/bin:/usr/sbin:/sbin bash scripts/bootstrap.sh
+          else
+            # Exercise the published one-line entry, pinned to the commit under test.
+            PATH=/usr/bin:/bin:/usr/sbin:/sbin bash -o pipefail -c \
+              'curl -fsSL "https://raw.githubusercontent.com/Christanding/CrystalSketch/$GITHUB_SHA/scripts/bootstrap.sh" | bash'
+          fi
+          printf '%s\n' "$UV_INSTALL_DIR" "$UV_TOOL_BIN_DIR" >> "$GITHUB_PATH"
+
+      - name: Install without preconfigured development tools (Windows)
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $env:Path = (@($env:Path -split ';' | Where-Object {
+            $_ -and -not (Test-Path -LiteralPath (Join-Path $_ 'uv.exe')) -and
+              -not (Test-Path -LiteralPath (Join-Path $_ 'bun.exe')) -and
+              -not (Test-Path -LiteralPath (Join-Path $_ 'git.exe')) -and
+              -not (Test-Path -LiteralPath (Join-Path $_ 'python.exe')) -and
+              -not (Test-Path -LiteralPath (Join-Path $_ 'python3.exe'))
+          }) -join ';')
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            & ([scriptblock]::Create((Get-Content -LiteralPath .\scripts\bootstrap.ps1 -Raw)))
+          } else {
+            & ([scriptblock]::Create((Invoke-RestMethod "https://raw.githubusercontent.com/Christanding/CrystalSketch/$env:GITHUB_SHA/scripts/bootstrap.ps1")))
+          }
+          @($env:UV_INSTALL_DIR, $env:UV_TOOL_BIN_DIR) |
+            Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      - name: Verify installed command and repeated launch
+        run: uv run --no-project --python 3.12 python scripts/smoke_install.py --work-dir "${{ runner.temp }}"
+
+      - name: Verify uninstall preserves Python and unrelated environments
+        shell: bash
+        run: |
+          uv run --no-project --python 3.12 python - <<'PY'
+          import os, shutil, subprocess, sys
+          from pathlib import Path
+          interpreter = Path(sys.executable).resolve()
+          python_root = Path(os.environ["UV_PYTHON_INSTALL_DIR"]).resolve()
+          assert interpreter.is_relative_to(python_root), "Bootstrap reused a host Python"
+          uv = shutil.which("uv")
+          assert uv is not None
+          unrelated = Path(os.environ["RUNNER_TEMP"]) / "unrelated-python-environment"
+          subprocess.run([uv, "venv", "--python", str(interpreter), str(unrelated)], check=True)
+          subprocess.run([uv, "tool", "uninstall", "crystalsketch"], check=True)
+          assert not (Path(os.environ["UV_TOOL_DIR"]) / "crystalsketch").exists()
+          assert shutil.which("Crystal") is None
+          assert Path(uv).is_file() and interpreter.is_file()
+          assert (unrelated / "pyvenv.cfg").is_file()
+          subprocess.run([str(interpreter), "--version"], check=True)
+          print("PASS: only CrystalSketch removed; uv, Python and unrelated environment retained")
+          PY
+
   install:
     name: Install on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

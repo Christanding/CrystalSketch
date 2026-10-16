@@ -20,6 +20,26 @@ CrystalSketch 是一款在浏览器中使用的晶体结构可视化与制图工
 
 支持 macOS、Windows 和 Linux，使用支持 WebGL 的现代浏览器。
 
+### 联网一键安装
+
+无需预装 Python、uv、Git 或 Bun。引导脚本会下载官方预构建安装包，检查后调用原安装器；缺少的 uv、Python 3.12 和程序依赖会自动准备。安装位置和后面的 `Crystal` 启动方式不变，不需要管理员权限。
+
+macOS / Linux，在终端粘贴一行：
+
+```sh
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/Christanding/CrystalSketch/main/scripts/bootstrap.sh | bash'
+```
+
+Windows，在系统自带的 PowerShell 中粘贴一行：
+
+```powershell
+& ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubusercontent.com/Christanding/CrystalSketch/main/scripts/bootstrap.ps1')))
+```
+
+安装完成后重新打开终端，输入 `Crystal`。Windows 应完全退出 Windows Terminal 后重开，而不只是新建标签页。
+
+此入口安装的是 **GitHub Release 中已经发布的版本**，不会安装尚未发布的本地源码改动。原有压缩包安装和源码安装仍可照常使用。下载需要能够访问 GitHub、Astral 和 Python 包源；不支持离线首次安装，也不会绕过组织安全策略。macOS/Linux 使用系统的 Bash 和 curl；Windows 使用 PowerShell 5.1 或更高版本及 .NET Framework 4.7.2+（或 PowerShell 7 自带的 .NET）。
+
 ### 下载压缩包
 
 前往 [GitHub Releases](https://github.com/Christanding/CrystalSketch/releases/latest)，在 **Assets** 中下载 **CrystalSketch.zip**，或[直接下载最新安装包](https://github.com/Christanding/CrystalSketch/releases/latest/download/CrystalSketch.zip)。不要将 GitHub 自动生成的 `Source code (zip)` 当作安装包。
@@ -99,6 +119,8 @@ Crystal
 ```sh
 uv tool uninstall crystalsketch
 ```
+
+该命令只移除 CrystalSketch 专属工具目录（包含其私有依赖副本）及 `Crystal` 启动命令。已经安装的 uv、Python 解释器、Git、Bun、其他项目的环境和工具都会保留；原始结构文件、浏览器保存的工作区及导出图片也不会清理。不需要执行 `uv python uninstall` 或 `uv tool uninstall --all`。
 
 ## 常见问题
 
