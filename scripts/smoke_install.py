@@ -13,7 +13,7 @@ import threading
 import time
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import ProxyHandler, build_opener
 
@@ -73,8 +73,36 @@ def stop_process(process: subprocess.Popen) -> None:
 
 def verify_update_check(base_url: str) -> None:
     opener = build_opener(ProxyHandler({}))
-    with opener.open(urljoin(base_url, "api/updates/check"), timeout=20) as response:
-        status = json.load(response)
+    # The local API does not forward GitHub's reset headers. Bound CI-only backoff;
+    # a limit that outlasts this budget must remain a failed, unverified check.
+    retry_delays = (60, 120)
+    for attempt in range(len(retry_delays) + 1):
+        try:
+            with opener.open(urljoin(base_url, "api/updates/check"), timeout=20) as response:
+                status = json.load(response)
+            break
+        except HTTPError as error:
+            if error.code != 429:
+                raise
+            with error:
+                try:
+                    reason = json.loads(error.read(4096))
+                except ValueError:
+                    raise error from None
+            if reason != {"detail": {"code": "rate-limited"}}:
+                raise
+            if attempt == len(retry_delays):
+                raise RuntimeError(
+                    "GitHub release lookup remained rate-limited after 3 attempts; "
+                    "in-app update support was not verified."
+                ) from error
+            delay = retry_delays[attempt]
+            print(
+                f"WARN: GitHub release lookup was rate-limited (HTTP 429); "
+                f"retrying check {attempt + 2}/3 in {delay}s.",
+                flush=True,
+            )
+            time.sleep(delay)
     if status.get("supported") is not True or status.get("status") not in {"latest", "available"}:
         raise RuntimeError(f"Installed application cannot update: {status.get('reason')}")
     print(
