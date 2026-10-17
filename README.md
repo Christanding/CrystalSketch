@@ -1,129 +1,83 @@
 # CrystalSketch
 
-CrystalSketch 是一款在浏览器中使用的晶体结构可视化与制图工具。打开 POSCAR、CONTCAR 或 CIF 等结构文件后，即可查看三维结构、调整配色和材质、测量原子间的距离与夹角，并导出用于论文、报告或演示的结构图。
+CrystalSketch 用来查看晶体结构、调整结构图，并导出用于论文、报告或演示的图片。支持打开 POSCAR、CONTCAR 和 CIF，导出 PNG、JPG 和 PDF。
 
-**[直接在线使用 CrystalSketch](https://christanding.github.io/CrystalSketch/)**，无需安装。
+[在线试用，无需安装](https://christanding.github.io/CrystalSketch/)。如果希望文件在自己的电脑上处理，可以按下面的步骤安装本地版。本地版也在浏览器中操作。
 
-- **美观**：内置多套元素配色和材质，支持调节光照，展示原子、化学键、配位多面体与晶轴。
-- **易用**：在浏览器中完成结构加载、预览与图片导出，支持多文件切换和双视图对比。
-- **可靠**：保留原始结构文件不变；POSCAR / CONTCAR 可在浏览器中解析，其他格式读取与对称性分析由 pymatgen 支持。
-- **高效**：针对多原子结构优化显示与交互，实际流畅度取决于结构复杂度和设备配置。
-- **灵活**：颜色、半径、材质、透明度、视角和导出参数均可调整，支持 PNG、JPG 和 PDF 图片导出，也可创建模型副本进行编辑并导出 POSCAR。
+## 安装到电脑
 
-如需完全在本机处理，请使用下方的本地安装版。
+推荐使用一键安装，按自己的系统选择一条命令即可。首次安装需要联网，**不用提前安装 Python、uv、Git 或 Bun，也不需要管理员权限**。
 
-## 本地安装
+### Windows
 
-支持 macOS、Windows 和 Linux，使用支持 WebGL 的现代浏览器。
-
-### 联网一键安装
-
-无需预装 Python、uv、Git 或 Bun。引导脚本会下载官方预构建安装包，检查后调用原安装器；缺少的 uv、Python 3.12 和程序依赖会自动准备。安装位置和后面的 `Crystal` 启动方式不变，不需要管理员权限。
-
-macOS / Linux，在终端粘贴一行：
-
-```sh
-bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/Christanding/CrystalSketch/main/scripts/bootstrap.sh | bash'
-```
-
-Windows，在系统自带的 PowerShell 中粘贴一行：
+打开 PowerShell，复制下面整行命令，粘贴后按回车：
 
 ```powershell
 & ([scriptblock]::Create((Invoke-RestMethod 'https://raw.githubusercontent.com/Christanding/CrystalSketch/main/scripts/bootstrap.ps1')))
 ```
 
-安装完成后重新打开终端，输入 `Crystal`。
+### macOS / Linux
 
-
-### 下载压缩包
-
-前往 [GitHub Releases](https://github.com/Christanding/CrystalSketch/releases/latest)，在 **Assets** 中下载 **CrystalSketch.zip**，或[直接下载最新安装包](https://github.com/Christanding/CrystalSketch/releases/latest/download/CrystalSketch.zip)。不要将 GitHub 自动生成的 `Source code (zip)` 当作安装包。
-
-解压后，在 `CrystalSketch` 文件夹中打开终端，按系统执行一条安装命令。
-
-macOS / Linux：
+打开终端，复制下面整行命令，粘贴后按回车：
 
 ```sh
-bash install.sh
+bash -o pipefail -c 'curl -fsSL https://raw.githubusercontent.com/Christanding/CrystalSketch/main/scripts/bootstrap.sh | bash'
 ```
 
-Windows（PowerShell）：
+安装命令会下载已发布的安装包，并自动准备 Python 3.12 等运行组件。等待安装结束后，继续下面的启动步骤。下载需要能访问 GitHub 和依赖下载站点。
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
-```
+## 启动并开始画图
 
-首次安装需要联网，安装程序会自动准备 Python 和所需依赖，无需手动安装开发工具或编译项目。安装完成后重新打开终端即可使用，不需要保留源码文件夹。
+安装完成后，**完全关闭终端，再重新打开**。Windows Terminal 也要关闭整个程序，不能只新建标签页。
 
-Windows 安装器会自动将 `Crystal` 的命令目录保存到用户 PATH，并在新 PowerShell 进程中验证。安装后请完全退出 Windows Terminal 再重新打开一次；之后直接输入 `Crystal` 即可，不需要反复修复。
-
-### 从 GitHub 仓库安装（推荐）
-
-Windows 如果尚未安装 Git，先执行：
-
-```powershell
-winget install --id Git.Git -e --source winget
-```
-
-安装完成后重新打开终端，再执行下面的安装命令。
-
-已安装 Git 时，也可以用一条命令拉取仓库并安装。
-
-macOS / Linux：
-
-```sh
-git clone https://github.com/Christanding/CrystalSketch.git && cd CrystalSketch && bash scripts/install.sh
-```
-
-Windows（PowerShell）：
-
-```powershell
-git clone https://github.com/Christanding/CrystalSketch.git; if ($LASTEXITCODE -eq 0) { Set-Location CrystalSketch; powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 }
-```
-
-脚本会自动准备所需工具、构建并安装当前仓库版本，不需要分别运行网页与后台服务。安装完成后重新打开终端即可。
-
-## 启动与使用
-
-直接打开终端，输入以下命令即可，无需进入项目文件夹：
+输入：
 
 ```sh
 Crystal
 ```
 
-浏览器会自动打开 CrystalSketch。如果没有自动打开，点击终端显示的本地网址即可，无需指定端口或另开服务。
-
-同一系统用户的正式安装只运行一个服务。重复执行 `Crystal` 会打开已有服务并退出本次启动，不再另起端口；显式指定其他端口也不会建立第二个正式实例。异常退出后再次运行可自动恢复。首次从旧版升级时，如果旧终端仍在运行，请先在旧终端按 `Ctrl+C` 退出一次。
+浏览器会自动打开 CrystalSketch；如果没有打开，点击终端里显示的本地网址即可。以后每次使用都输入 `Crystal`，不需要重新安装，也不需要进入安装目录。
 
 1. 点击“打开”，选择晶体结构文件。
-2. 旋转、缩放结构，按需要调整配色、材质、光照和显示内容。
-3. 在“导出”中设置图片参数并保存；如需修改结构，先在“建模”中创建模型副本，完成修改后再导出 POSCAR。
+2. 旋转、缩放结构，调整原子颜色、材质、光照、透明度和显示内容。
+3. 如需测量，添加原子间的距离或夹角标注。
+4. 在“导出”中选择图片格式和参数，保存图片。
 
-使用期间保持启动终端运行。结束后，在该终端按 `Ctrl+C` 停止程序；下次使用只需再次执行启动命令，无需重新安装。
+使用期间保持启动终端打开。结束后，在该终端按 `Ctrl+C` 停止程序。
 
-## 检查与安装更新
+### 还可以做什么
 
-本地版在“设置”中点击一次“检查更新”即可查询官方发布。对于通过安装器管理的 `uv tool` 安装，发现新版本后会自动保存当前工作区、下载并校验官方安装包、备份现有工具环境，然后覆盖安装并在原端口重启，无需再次确认。保存和安装期间暂时锁定编辑；保存失败不会开始安装。只有新服务通过健康和版本检查后才刷新页面；安装或启动失败时尝试恢复上一份安装。
+- 调整原子半径、键和线条的显示，查看配位多面体与晶轴。
+- 使用内置配色、材质和光照，调整图片效果。
+- 同时打开多个文件，在文件之间切换，或用双视图对比。
+- 在“建模”中创建副本、编辑结构，再导出 POSCAR；原始文件保持不变。
 
-更新只修改当前 CrystalSketch 工具环境与入口，不修改原始结构文件或其他工具。更新过程中请等待状态提示，不要关闭计算机。源码开发、非受控服务、旧版多实例占用和在线版不支持页面内覆盖安装；在线版由站点发布更新，源码版按开发流程更新。开发服务不参与正式安装的单实例管理，回退备份、源码目录和下载的安装包也不会被当作多余版本删除。
+界面需要支持 WebGL 的现代浏览器。程序针对多原子结构做了显示优化，实际流畅度仍取决于结构大小和电脑配置。
+
+## 更新
+
+在本地版的“设置”中点击一次“检查更新”。发现新版本后，程序会保存当前工作区，下载并覆盖安装新版，然后自动重启、刷新页面，不需要再执行安装命令。
+
+如果提示另一个旧版程序仍在运行，请先在旧终端按 `Ctrl+C` 退出，再重试。更新前的备份、下载的安装包和源码目录不会被自动删除。
 
 ## 卸载
 
-先导出需要保留的结构和图片，等待正在进行的更新结束，再在运行 CrystalSketch 的终端按 `Ctrl+C` 停止程序并关闭它的浏览器标签页。使用安装时的系统账号执行下面一种卸载方式；**不要在更新过程中卸载**。
+先导出需要保留的结构和图片，在启动终端按 `Ctrl+C` 停止程序，再关闭它的浏览器标签页。使用安装时的系统账号卸载，**不要在更新过程中卸载**。
 
-### 只卸载程序，保留使用记录
+通常只需在终端执行这一条命令：
 
 ```sh
 uv tool uninstall crystalsketch
 ```
 
-该命令移除 CrystalSketch 专属工具目录（包含其私有依赖副本）及 `Crystal` 启动命令，保留程序缓存和浏览器工作区。
+它会移除 CrystalSketch 和 `Crystal` 启动命令，保留程序缓存。Python、uv、Git、Bun、其他项目的环境，以及你的结构文件和导出图片都不会因此被删除。
 
-### 完整卸载本地程序与缓存
+<details>
+<summary>完整卸载本地程序，同时清理缓存和更新备份</summary>
 
-下面每个代码块都是一条可整段粘贴执行的命令：先卸载程序，成功后再将 CrystalSketch 自身的更新下载、日志、回退备份和运行状态目录移入回收站／废纸篓。缓存不存在时跳过；卸载失败时不清理缓存。
+按自己的系统复制下面整块命令，一次粘贴执行。卸载成功后，命令会把程序的更新下载、日志、回退备份和运行记录移入回收站或废纸篓；卸载失败时不会清理这些文件。
 
-Windows，在 PowerShell 中执行（使用系统[回收站接口](https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualbasic.fileio.filesystem.deletedirectory)）：
+Windows（PowerShell，使用系统[回收站接口](https://learn.microsoft.com/en-us/dotnet/api/microsoft.visualbasic.fileio.filesystem.deletedirectory)）：
 
 ```powershell
 & {
@@ -140,66 +94,152 @@ Windows，在 PowerShell 中执行（使用系统[回收站接口](https://learn
 }
 ```
 
-macOS，在终端执行：
+macOS：
 
 ```sh
 bash -c 'set -e; uv tool uninstall crystalsketch; crystal_cache="${HOME:?}/Library/Caches/CrystalSketch"; if [ -e "$crystal_cache" ] || [ -L "$crystal_cache" ]; then crystal_trash="$(mktemp -d "${HOME:?}/.Trash/CrystalSketch-cache.XXXXXXXX")"; mv "$crystal_cache" "$crystal_trash/CrystalSketch"; fi'
 ```
 
-Linux 桌面环境提供 `gio` 时，在终端执行：
+Linux（桌面环境需要提供 `gio` 命令）：
 
 ```sh
 bash -c 'set -e; command -v gio >/dev/null || { printf "%s\n" "gio is required to move the cache to Trash; no changes made." >&2; exit 1; }; crystal_cache="${XDG_CACHE_HOME:-${HOME:?}/.cache}/CrystalSketch"; case "$crystal_cache" in /*) ;; *) printf "%s\n" "XDG_CACHE_HOME must be an absolute path." >&2; exit 1;; esac; uv tool uninstall crystalsketch; if [ -e "$crystal_cache" ] || [ -L "$crystal_cache" ]; then gio trash "$crystal_cache"; fi'
 ```
 
+缓存不存在时会跳过清理。如果提示回收站权限不足，程序可能已经卸载，但缓存还在原处，请按错误提示处理。Linux 没有 `gio` 时，仍可执行上面的普通卸载命令。
+
+</details>
+
+这两种卸载都不会清除浏览器里保存的工作区和设置。如需清理浏览器数据，请先导出尚未保存到磁盘的内容。
+
+## 其他安装方式
+
+一键安装之外，也可以下载安装包，或从仓库源码安装。选一种即可。
+
+<details>
+<summary>下载安装包，再运行安装命令</summary>
+
+前往 [GitHub Releases](https://github.com/Christanding/CrystalSketch/releases/latest)，在 **Assets** 中下载 **CrystalSketch.zip**，或[直接下载最新安装包](https://github.com/Christanding/CrystalSketch/releases/latest/download/CrystalSketch.zip)。不要下载旁边的 `Source code (zip)`，它不是安装包。
+
+先完整解压，再在解压得到的 `CrystalSketch` 文件夹中打开终端，按系统执行：
+
+macOS / Linux：
+
+```sh
+bash install.sh
+```
+
+Windows（PowerShell）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+安装时仍需联网。脚本会准备 Python 和所需组件，你不需要手动编译。完成后关闭并重新打开终端，输入 `Crystal`。
+
+</details>
+
+<details>
+<summary>从源码安装：需要 Git，适合安装仓库中的代码</summary>
+
+这种方式会下载并构建仓库中的代码。只想使用已发布版本时，选择前面的一键安装即可。
+
+Windows 如果还没有 Git，先执行：
+
+```powershell
+winget install --id Git.Git -e --source winget
+```
+
+装好 Git 后，关闭并重新打开终端。已有 Git 的电脑可以直接执行下面的安装命令。
+
+macOS / Linux：
+
+```sh
+git clone https://github.com/Christanding/CrystalSketch.git && cd CrystalSketch && bash scripts/install.sh
+```
+
+Windows（PowerShell）：
+
+```powershell
+git clone https://github.com/Christanding/CrystalSketch.git; if ($LASTEXITCODE -eq 0) { Set-Location CrystalSketch; powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 }
+```
+
+脚本会准备构建工具并安装程序，不需要你分别启动网页和后台。安装完成后输入 `Crystal` 即可，运行程序不再依赖源码文件夹。
+
+</details>
 
 ## 常见问题
 
-### Windows 提示无法识别 Crystal
+<details>
+<summary>Windows 提示找不到 Crystal</summary>
 
-新版安装器会自动保存并验证 `Crystal` 的用户 PATH。安装完成后，只需完全退出 Windows Terminal 再重新打开一次；不需要每次手动修复，也不需要管理员权限。
+先完全退出 Windows Terminal，再重新打开；只关一个标签页可能不够。安装器会保存并验证命令路径，正常安装后不需要反复修复。
 
-如果旧版安装仍提示“无法识别”或“不是内部或外部命令”，下载最新的 **CrystalSketch.zip** 并完整解压。在解压后的文件夹中运行以下命令，只修复已有安装的命令路径，不重新安装：
+如果仍找不到命令，下载并完整解压最新的 `CrystalSketch.zip`，在解压后的文件夹中运行下面的命令。它只修复已有安装的启动路径，不会重新安装程序，也不需要管理员权限：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -RepairPath
 ```
 
-修复后完全退出终端程序再重开，而不只是新建标签页。如果提示没有找到 `Crystal.exe`，说明尚未完成安装，请按上面的两种安装方式之一安装；`-RepairPath` 不能代替安装。
+修复后再完全退出并重开终端。如果提示 `Crystal.exe` 没有安装，请回到前面的一键安装步骤；修复路径不能代替安装。
 
-### Windows 提示无法识别 uv
+</details>
 
-正常安装 CrystalSketch 时无需先手动安装 uv：两种安装方式都会自动准备它。安装器也能识别通过 `UV_INSTALL_DIR` 或 `UV_UNMANAGED_INSTALL` 指定的目录，无需自行拼接用户名和路径。
+<details>
+<summary>卸载时提示找不到 uv</summary>
 
-如果是在单独运行 `uv`（例如卸载时）提示无法识别，先完全关闭终端程序并重新打开，再输入 `uv --version` 检查。确实尚未安装 uv 时，可在 PowerShell 中选择以下任意一种方式安装，**不需要两种都执行**。
+`uv` 是安装器自动准备的工具，也用于卸载 CrystalSketch。先关闭并重新打开终端，再输入 `uv --version` 检查。
 
-方式一：使用 WinGet：
+如果确认没有安装 uv，在 Windows PowerShell 里选择下面任意一种方式安装，不要两种都执行。
+
+有 WinGet 时：
 
 ```powershell
 winget install --id astral-sh.uv -e --source winget
 ```
 
-方式二：如果无法识别 `winget`，使用官方安装脚本：
+如果连 `winget` 也找不到，使用 uv 官方安装脚本：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
-安装完成后，完全关闭终端程序并重新打开，再执行：
+完成后重开终端，执行：
 
 ```powershell
 uv --version
 ```
 
-显示版本号即表示安装成功。
+看到版本号后，再执行卸载命令。如果你设置过自定义安装目录，安装器支持 `UV_INSTALL_DIR` 和 `UV_UNMANAGED_INSTALL`，无需手动拼接用户名。
 
-### 覆盖解压新安装包后仍装到旧版
+</details>
 
-从 v0.2.2 起，Windows 与 macOS/Linux 安装器都会按修改时间选择目录中最新的 wheel，避免解压目录残留旧包时误选。升级时使用新压缩包内的安装脚本和 wheel，不要混用旧脚本；在新文件夹中完整解压也可避免混淆。
+<details>
+<summary>多次输入 Crystal，会打开多个程序吗？</summary>
 
-### Windows 从源码安装时，准备 Bun 后提示找不到 uv
+同一系统账号的正常安装只运行一个程序。再次输入 `Crystal` 会打开已有程序的页面，不会另起一个后台；手动指定其他端口也不会多开。异常退出后，可以重新运行 `Crystal`。
 
-新版安装器让 Bun 引导过程保留当前进程的 PATH，再添加 Bun 所在目录，避免覆盖原来的 Python、uv 和系统工具路径。若使用旧脚本遇到此问题，更新仓库或重新下载完整安装包后，仍按原来的安装命令执行，无需手工改系统 PATH。
+从旧版本升级后，如果提示旧程序仍在运行，先在原来的终端按 `Ctrl+C` 退出一次。直接运行源码进行开发调试的服务不受上述限制。
+
+</details>
+
+<details>
+<summary>解压新安装包后，装上的还是旧版</summary>
+
+把新安装包完整解压到一个新文件夹，再运行其中的安装脚本，不要把新旧文件混用。
+
+从 v0.2.2 起，安装器会按修改时间选择最新的 `.whl` 安装文件。保留旧脚本、只替换部分文件，仍可能导致装错版本。
+
+</details>
+
+<details>
+<summary>Windows 从源码安装，准备 Bun 后提示找不到 uv</summary>
+
+旧安装脚本可能在准备 Bun 时覆盖命令搜索路径，导致已经安装的 uv 暂时找不到。当前脚本会保留原有路径，再加入 Bun 的目录。
+
+更新仓库，或下载并完整解压新的安装包，然后按原命令安装即可，不需要手动修改系统 PATH。
+
+</details>
 
 ## 许可证
 
