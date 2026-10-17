@@ -78,8 +78,18 @@ jobs:
           @($env:UV_INSTALL_DIR, $env:UV_TOOL_BIN_DIR) |
             Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
-      - name: Verify installed command, repeated launch and update support
-        run: uv run --no-project --python 3.12 python scripts/smoke_install.py --work-dir "${{ runner.temp }}" --check-updates
+      - name: Fetch official release metadata with workflow authentication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --hostname github.com \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            repos/Christanding/CrystalSketch/releases/latest \
+            > "$RUNNER_TEMP/crystal-release.json"
+
+      - name: Verify installed command, repeated launch and updater compatibility
+        run: uv run --no-project --python 3.12 python scripts/smoke_install.py --work-dir "${{ runner.temp }}" --release-metadata "${{ runner.temp }}/crystal-release.json"
 
       - name: Verify uninstall preserves Python and unrelated environments
         shell: bash

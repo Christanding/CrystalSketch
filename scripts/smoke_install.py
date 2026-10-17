@@ -13,7 +13,7 @@ import threading
 import time
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.error import HTTPError, URLError
+from urllib.error import URLError
 from urllib.parse import urljoin, urlsplit
 from urllib.request import ProxyHandler, build_opener
 
@@ -71,43 +71,52 @@ def stop_process(process: subprocess.Popen) -> None:
         process.wait(timeout=5)
 
 
-def verify_update_check(base_url: str) -> None:
-    opener = build_opener(ProxyHandler({}))
-    # The local API does not forward GitHub's reset headers. Bound CI-only backoff;
-    # a limit that outlasts this budget must remain a failed, unverified check.
-    retry_delays = (60, 120)
-    for attempt in range(len(retry_delays) + 1):
-        try:
-            with opener.open(urljoin(base_url, "api/updates/check"), timeout=20) as response:
-                status = json.load(response)
-            break
-        except HTTPError as error:
-            if error.code != 429:
-                raise
-            with error:
-                try:
-                    reason = json.loads(error.read(4096))
-                except ValueError:
-                    raise error from None
-            if reason != {"detail": {"code": "rate-limited"}}:
-                raise
-            if attempt == len(retry_delays):
-                raise RuntimeError(
-                    "GitHub release lookup remained rate-limited after 3 attempts; "
-                    "in-app update support was not verified."
-                ) from error
-            delay = retry_delays[attempt]
-            print(
-                f"WARN: GitHub release lookup was rate-limited (HTTP 429); "
-                f"retrying check {attempt + 2}/3 in {delay}s.",
-                flush=True,
-            )
-            time.sleep(delay)
-    if status.get("supported") is not True or status.get("status") not in {"latest", "available"}:
-        raise RuntimeError(f"Installed application cannot update: {status.get('reason')}")
+def probe_installed_updater(metadata: Path) -> dict[str, str]:
+    """Run inside the installed tool, using real release data fetched by CI's authenticated step."""
+    from unittest.mock import patch
+
+    from crystalsketch.server import updater
+
+    installation = updater.detect_installation()
+
+    def release_response(url: str, timeout: float):
+        if url != updater.LATEST_RELEASE_API:
+            raise RuntimeError("Unexpected update request during metadata validation")
+        return metadata.open("rb")
+
+    # Substitute only the download transport in this disposable probe process.
+    # The installed updater still validates the full, unmodified release response.
+    with patch.object(updater, "_official_open", release_response):
+        release = updater.latest_release()
+    return {
+        "currentVersion": updater.current_version(), "latestVersion": release.version,
+        "entrypoint": str(installation.entrypoint),
+    }
+
+
+def verify_update_support(
+    command: str, metadata: Path, work: str, environment: dict[str, str],
+) -> None:
+    uv = shutil.which("uv", path=environment.get("PATH"))
+    if not uv:
+        raise RuntimeError("uv must be available to the installed updater")
+    tool_dir = Path(subprocess.check_output(
+        [uv, "--no-config", "--color", "never", "tool", "dir"],
+        cwd=work, env=environment, text=True, encoding="utf-8", timeout=10,
+    ).strip())
+    executable = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    python = tool_dir / "crystalsketch" / executable
+    status = json.loads(subprocess.check_output(
+        [str(python), "-I", str(Path(__file__).resolve()), "--probe-installed-updater",
+         "--release-metadata", str(metadata.resolve())],
+        cwd=work, env=environment, text=True, encoding="utf-8", timeout=30,
+    ))
+    if Path(status["entrypoint"]).resolve() != Path(command).resolve():
+        raise RuntimeError("Updater probe inspected a different Crystal installation")
     print(
-        f"PASS: installed v{status['currentVersion']} supports in-app updates; "
-        f"latest release v{status['latestVersion']} ({status['status']}); no update applied"
+        f"PASS: installed updater v{status['currentVersion']} recognized its tool environment "
+        f"and validated supplied release v{status['latestVersion']}; "
+        "read-only metadata probe, no live update API call or installation"
     )
 
 
@@ -127,18 +136,28 @@ def verify_repeat_launch(command: str, work: str, environment: dict[str, str], p
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--work-dir", type=Path, required=True)
+    parser.add_argument("--work-dir", type=Path)
     parser.add_argument(
-        "--check-updates", action="store_true", help="Check update support without installing"
+        "--release-metadata", type=Path,
+        help="Validate updater compatibility using the official release JSON fetched by CI",
     )
+    parser.add_argument("--probe-installed-updater", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
+    if args.probe_installed_updater:
+        if args.release_metadata is None:
+            parser.error("--release-metadata is required for an installed updater probe")
+        print(json.dumps(probe_installed_updater(args.release_metadata)))
+        return
+    if args.work_dir is None:
+        parser.error("--work-dir is required for an installation smoke test")
     repository = Path(__file__).resolve().parents[1]
     if args.work_dir.resolve().is_relative_to(repository):
         raise SystemExit("The smoke test work directory must be outside the repository")
     environment = dict(
         os.environ, PYTHONUNBUFFERED="1", PYTHONIOENCODING="utf-8", NO_COLOR="1", COLUMNS="160"
     )
-    environment.pop("PYTHONPATH", None)
+    for name in ("PYTHONPATH", "GH_TOKEN", "GITHUB_TOKEN"):
+        environment.pop(name, None)
     if os.name == "nt":
         import winreg
 
@@ -186,8 +205,8 @@ def main() -> None:
                         if process.poll() is not None:
                             raise RuntimeError("Repeat launch stopped the original service")
                         verify(base_url)
-                        if args.check_updates:
-                            verify_update_check(base_url)
+                        if args.release_metadata is not None:
+                            verify_update_support(command, args.release_metadata, work, environment)
                         print(
                             "PASS: global Crystal served HTML, JavaScript "
                             f"and health at {base_url}; repeat launch reused that service"
